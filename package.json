@@ -1,0 +1,62 @@
+{
+  "name": "pawplacer-cli",
+  "version": "1.0.0",
+  "description": "Command-line interface for the PawPlacer API",
+  "license": "MIT",
+  "author": "PawPlacer",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pawplacer/cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/pawplacer/cli/issues"
+  },
+  "homepage": "https://github.com/pawplacer/cli#readme",
+  "type": "module",
+  "bin": {
+    "pawplacer": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "check": "npm run typecheck && npm test && npm run build",
+    "dev": "tsx src/cli.ts",
+    "pack:dry-run": "npm pack --dry-run",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run check",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "pawplacer",
+    "cli",
+    "animals",
+    "pets",
+    "shelter",
+    "adoption"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^8.5.2",
+    "chalk": "^5.6.2",
+    "commander": "^14.0.2",
+    "pawplacer-sdk": "^1.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "tsup": "^8.5.1",
+    "tsx": "^4.20.6",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
