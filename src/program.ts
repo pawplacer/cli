@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import process from "node:process";
 
+import packageJson from "../package.json";
 import {
   confirm,
   input,
@@ -530,7 +531,7 @@ export function createProgram(deps: ProgramDeps = {}): Command {
   program
     .name("pawplacer")
     .description("Command-line interface for the PawPlacer API")
-    .version("0.1.0")
+    .version(packageJson.version)
     .option("--api-key <key>", "PawPlacer API key; defaults to PAWPLACER_API_KEY")
     .option("--api-url <url>", "PawPlacer API URL")
     .option("--timeout <ms>", "request timeout in milliseconds")

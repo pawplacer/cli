@@ -1,6 +1,6 @@
 {
   "name": "pawplacer-cli",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Command-line interface for the PawPlacer API",
   "license": "MIT",
   "author": "PawPlacer",
@@ -47,7 +47,7 @@
     "@inquirer/prompts": "^8.5.2",
     "chalk": "^5.6.2",
     "commander": "^14.0.2",
-    "pawplacer-sdk": "^1.4.0"
+    "pawplacer-sdk": "^1.4.1"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
