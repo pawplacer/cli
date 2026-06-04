@@ -175,6 +175,20 @@ describe("pawplacer CLI", () => {
     const client = createMockClient();
     vi.mocked(client.people.getCustomFields).mockResolvedValue([
       {
+        field_key: "full_name",
+        field_type: "text",
+        label: "Full Name",
+        required: true,
+        section: "Personal Information",
+      },
+      {
+        field_key: "email_address",
+        field_type: "email",
+        label: "Email Address",
+        required: true,
+        section: "Personal Information",
+      },
+      {
         field_key: "experience",
         field_type: "text",
         help_text: "Prior pet experience",
@@ -208,10 +222,7 @@ describe("pawplacer CLI", () => {
       },
     ]);
     const prompts = createPrompts({
-      checkbox: vi
-        .fn()
-        .mockResolvedValueOnce(["housing", "availability"])
-        .mockResolvedValueOnce(["Weekends"]),
+      checkbox: vi.fn().mockResolvedValueOnce(["Weekends"]),
       input: vi
         .fn()
         .mockResolvedValueOnce("Jane")
@@ -223,7 +234,10 @@ describe("pawplacer CLI", () => {
       select: vi
         .fn()
         .mockResolvedValueOnce("adopter")
-        .mockResolvedValueOnce("house"),
+        .mockResolvedValueOnce("housing")
+        .mockResolvedValueOnce("house")
+        .mockResolvedValueOnce("availability")
+        .mockResolvedValueOnce("__pawplacer_done__"),
     });
 
     await runCommand(["--api-key", "key", "people", "create", "--prompt"], client, {
@@ -232,6 +246,15 @@ describe("pawplacer CLI", () => {
 
     expect(client.people.getCustomFields).toHaveBeenCalledWith("adopter");
     expect(prompts.checkbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        choices: [
+          { name: "Weekdays", value: "Weekdays" },
+          { name: "Weekends", value: "Weekends" },
+        ],
+        message: "Availability",
+      }),
+    );
+    expect(prompts.select).toHaveBeenCalledWith(
       expect.objectContaining({
         choices: expect.arrayContaining([
           expect.objectContaining({
@@ -244,8 +267,17 @@ describe("pawplacer CLI", () => {
             name: "Availability",
             value: "availability",
           }),
+          expect.objectContaining({
+            name: "Done adding custom fields",
+            value: "__pawplacer_done__",
+          }),
         ]),
-        message: "Custom fields to add",
+        message: "Add custom field",
+      }),
+    );
+    expect(prompts.input).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Personal Information: Full Name (required)",
       }),
     );
     expect(client.people.create).toHaveBeenCalledWith(

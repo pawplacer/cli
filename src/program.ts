@@ -125,6 +125,30 @@ class CliUsageError extends Error {
 
 const PERSON_TYPES = ["adopter", "foster", "surrender", "volunteer"] as const;
 const CONTRACT_TYPES = ["adopter", "foster", "surrender", "volunteer"] as const;
+const PERSON_COLUMN_FIELD_KEYS = new Set([
+  "address",
+  "capacity",
+  "email",
+  "email_address",
+  "foster_capacity",
+  "full_name",
+  "name",
+  "phone",
+  "phone_number",
+  "status",
+]);
+const PERSON_COLUMN_FIELD_LABELS = new Set([
+  "address",
+  "email",
+  "email address",
+  "foster capacity",
+  "full name",
+  "name",
+  "phone",
+  "phone number",
+  "status",
+]);
+const CUSTOM_FIELDS_DONE = "__pawplacer_done__";
 
 function parseIntegerOption(
   value: string | undefined,
@@ -392,6 +416,14 @@ function humanizeIdentifier(value: string): string {
     .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
+function normalizeToken(value: string): string {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
 function optionLabel(value: unknown): string {
   if (typeof value === "string" && value.trim()) {
     return value.trim();
@@ -447,6 +479,15 @@ function normalizeOptions(options: unknown): CustomFieldOption[] {
   return [];
 }
 
+function isPersonColumnField(fieldKey: string, label: string): boolean {
+  const normalizedKey = normalizeToken(fieldKey).replace(/\s+/g, "_");
+  const normalizedLabel = normalizeToken(label);
+  return (
+    PERSON_COLUMN_FIELD_KEYS.has(normalizedKey) ||
+    PERSON_COLUMN_FIELD_LABELS.has(normalizedLabel)
+  );
+}
+
 function normalizeCustomFields(fields: unknown): NormalizedCustomField[] {
   const rawFields = Array.isArray(fields)
     ? fields
@@ -466,6 +507,10 @@ function normalizeCustomFields(fields: unknown): NormalizedCustomField[] {
 
     const fieldType = optionLabel(field.field_type).toLowerCase();
     const label = optionLabel(field.label) || humanizeIdentifier(fieldKey);
+    if (isPersonColumnField(fieldKey, label)) {
+      return [];
+    }
+
     const helpText = optionLabel(field.help_text) || undefined;
     const section = optionLabel(field.section) || undefined;
 
@@ -587,31 +632,51 @@ async function promptForCustomFieldsPayload(
 
   const requiredFields = fields.filter((field) => field.required);
   const optionalFields = fields.filter((field) => !field.required);
-  const selectedOptionalFieldKeys = optionalFields.length
-    ? await prompts.checkbox({
-        message: "Custom fields to add",
-        choices: optionalFields.map((field) => ({
+  const customFieldData: Record<string, unknown> = {};
+
+  for (const field of requiredFields) {
+    const value = await promptForCustomFieldValue(prompts, field);
+    if (
+      field.required ||
+      (Array.isArray(value) && value.length > 0) ||
+      (typeof value === "string" && value.trim()) ||
+      (typeof value !== "string" && value !== undefined && value !== null)
+    ) {
+      customFieldData[field.fieldKey] =
+        typeof value === "string" ? value.trim() : value;
+    }
+  }
+
+  const remainingOptionalFields = [...optionalFields];
+  while (remainingOptionalFields.length) {
+    const selectedFieldKey = await prompts.select({
+      message: "Add custom field",
+      choices: [
+        ...remainingOptionalFields.map((field) => ({
           name: formatCustomFieldName(field),
           value: field.fieldKey,
           description: formatCustomFieldDescription(field),
         })),
-        pageSize: 12,
-      })
-    : [];
-  const selectedKeys = new Set([
-    ...requiredFields.map((field) => field.fieldKey),
-    ...selectedOptionalFieldKeys,
-  ]);
-  const customFieldData: Record<string, unknown> = {};
+        { name: "Done adding custom fields", value: CUSTOM_FIELDS_DONE },
+      ],
+      pageSize: 12,
+    });
 
-  for (const field of fields) {
-    if (!selectedKeys.has(field.fieldKey)) {
-      continue;
+    if (selectedFieldKey === CUSTOM_FIELDS_DONE) {
+      break;
     }
 
+    const selectedIndex = remainingOptionalFields.findIndex(
+      (field) => field.fieldKey === selectedFieldKey,
+    );
+    const field = remainingOptionalFields[selectedIndex];
+    if (!field) {
+      break;
+    }
+
+    remainingOptionalFields.splice(selectedIndex, 1);
     const value = await promptForCustomFieldValue(prompts, field);
     if (
-      field.required ||
       (Array.isArray(value) && value.length > 0) ||
       (typeof value === "string" && value.trim()) ||
       (typeof value !== "string" && value !== undefined && value !== null)
