@@ -150,14 +150,43 @@ describe("pawplacer CLI", () => {
         options: ["Low", "Medium", "High"],
         required: false,
       },
+      {
+        field_key: "medical_conditions",
+        field_type: "multiselect",
+        label: "Medical Conditions",
+        options: ["Allergies", "Anxiety"],
+        required: false,
+        section: "Health & Medical",
+      },
+      {
+        field_key: "tags",
+        field_type: "multiselect",
+        label: "Tags",
+        options: ["Urgent"],
+        required: false,
+        section: "Health & Medical",
+      },
     ]);
     const prompts = createPrompts({
+      checkbox: vi
+        .fn()
+        .mockResolvedValueOnce([
+          "color",
+          "spayed",
+          "good_with",
+          "temperaments",
+          "special_needs",
+        ])
+        .mockResolvedValueOnce(["dogs", "kids"])
+        .mockResolvedValueOnce(["playful"])
+        .mockResolvedValueOnce(["Allergies"]),
       confirm: vi.fn().mockResolvedValue(true),
       input: vi
         .fn()
         .mockResolvedValueOnce("Max")
         .mockResolvedValueOnce("Lab, Mix")
         .mockResolvedValueOnce("Good dog")
+        .mockResolvedValueOnce("Black, White")
         .mockResolvedValueOnce("Ball"),
       number: vi.fn().mockResolvedValue(250),
       select: vi
@@ -196,23 +225,41 @@ describe("pawplacer CLI", () => {
         message: "Name (required)",
       }),
     );
+    expect(prompts.select).toHaveBeenCalledWith(
+      expect.objectContaining({
+        choices: expect.not.arrayContaining([
+          expect.objectContaining({
+            name: "Health & Medical: Medical Conditions",
+          }),
+          expect.objectContaining({
+            name: "Health & Medical: Tags",
+          }),
+        ]),
+        message: "Add custom field",
+      }),
+    );
     expect(client.pets.create).toHaveBeenCalledWith(
       {
         adoption_fee: 250,
         age_category: "young",
         breed: ["Lab", "Mix"],
+        color: ["Black", "White"],
         custom_field_data: {
           energy_level: "High",
           favorite_toy: "Ball",
         },
         description: "Good dog",
+        good_with: ["dogs", "kids"],
         health: "good",
         name: "Max",
         sex: "male",
         show_public: true,
         size: "medium",
         species: "dog",
+        spayed: true,
+        special_needs: ["Allergies"],
         status: "available",
+        temperaments: ["playful"],
       },
       { idempotencyKey: undefined, retry: undefined },
     );

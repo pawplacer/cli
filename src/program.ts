@@ -156,6 +156,45 @@ const PERSON_STATUSES = [
   "suspended",
   "blocked",
 ] as const;
+const PET_COMPATIBILITIES = [
+  "activeLifestyle",
+  "cats",
+  "disabledMental",
+  "disabledPhysical",
+  "dogs",
+  "families",
+  "firstTimeOwners",
+  "frequentTravelers",
+  "kids",
+  "otherPets",
+  "outdoorsLiving",
+  "sedentaryLifestyle",
+  "seniors",
+  "smallApartments",
+] as const;
+const PET_TEMPERAMENTS = [
+  "affectionate",
+  "aggressive",
+  "cuddly",
+  "curious",
+  "docile",
+  "energetic",
+  "fearful",
+  "gentle",
+  "independent",
+  "loyal",
+  "mischievous",
+  "moody",
+  "playful",
+  "protective",
+  "quiet",
+  "rough",
+  "shy",
+  "smart",
+  "social",
+  "stubborn",
+  "vocal",
+] as const;
 const PET_COLUMN_FIELD_KEYS = new Set([
   "adoption_fee",
   "age",
@@ -176,6 +215,7 @@ const PET_COLUMN_FIELD_KEYS = new Set([
   "health",
   "image_urls",
   "intake_date",
+  "medical_conditions",
   "microchip_id",
   "name",
   "outcome_date",
@@ -191,6 +231,8 @@ const PET_COLUMN_FIELD_KEYS = new Set([
   "special_needs",
   "species",
   "status",
+  "tag_ids",
+  "tags",
   "temperaments",
   "weight",
 ]);
@@ -207,6 +249,7 @@ const PET_COLUMN_FIELD_LABELS = new Set([
   "good with",
   "health",
   "intake date",
+  "medical conditions",
   "microchip id",
   "name",
   "outcome date",
@@ -220,6 +263,7 @@ const PET_COLUMN_FIELD_LABELS = new Set([
   "special needs",
   "species",
   "status",
+  "tags",
   "temperaments",
   "weight",
 ]);
@@ -400,10 +444,15 @@ async function promptForPetPayload(
   prompts: PromptAdapter,
   loadCustomFields?: () => Promise<unknown>,
 ): Promise<Record<string, unknown>> {
+  const customFieldsResponse = await loadCustomFields?.();
   const customFields = normalizeCustomFields(
-    await loadCustomFields?.(),
+    customFieldsResponse,
     isPetColumnField,
   );
+  const medicalConditionOptions = findCustomFieldOptions(customFieldsResponse, [
+    "Medical Conditions",
+    "Special Needs",
+  ]);
   const payload: Record<string, unknown> = {
     name: await prompts.input({ message: "Pet name", required: true }),
     species: await prompts.select({
@@ -484,6 +533,12 @@ async function promptForPetPayload(
     payload.description = description.trim();
   }
 
+  await promptForAdditionalPetDetails(
+    prompts,
+    payload,
+    medicalConditionOptions,
+  );
+
   payload.show_public = await prompts.confirm({
     message: "Show publicly?",
     default: true,
@@ -495,6 +550,164 @@ async function promptForPetPayload(
   }
 
   return payload;
+}
+
+function splitCommaSeparated(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function stringOptionChoices(
+  options: CustomFieldOption[],
+): { name: string; value: string }[] {
+  return options.map((option) => ({
+    name: option.label,
+    value: typeof option.value === "string" ? option.value : option.label,
+  }));
+}
+
+async function promptForAdditionalPetDetails(
+  prompts: PromptAdapter,
+  payload: Record<string, unknown>,
+  medicalConditionOptions: CustomFieldOption[],
+): Promise<void> {
+  const selectedDetails = await prompts.checkbox({
+    message: "Additional pet details to add",
+    choices: [
+      { name: "Color", value: "color" },
+      { name: "Spayed/neutered", value: "spayed" },
+      { name: "Microchip ID", value: "microchip_id" },
+      { name: "Good with", value: "good_with" },
+      { name: "Bad with", value: "bad_with" },
+      { name: "Temperaments", value: "temperaments" },
+      { name: "Medical conditions / special needs", value: "special_needs" },
+      { name: "Image URLs", value: "image_urls" },
+      { name: "Coat length", value: "coat_length" },
+      { name: "Custom ID", value: "custom_id" },
+      { name: "Intake date", value: "intake_date" },
+      { name: "Outcome date", value: "outcome_date" },
+      { name: "Weight", value: "weight" },
+      { name: "Status change notes", value: "status_change_notes" },
+    ],
+    pageSize: 14,
+  });
+  const selected = new Set(selectedDetails);
+
+  if (selected.has("color")) {
+    const value = await prompts.input({
+      message: "Color names, comma-separated",
+      default: "",
+    });
+    const colors = splitCommaSeparated(value);
+    if (colors.length) {
+      payload.color = colors;
+    }
+  }
+
+  if (selected.has("spayed")) {
+    payload.spayed = await prompts.confirm({
+      message: "Spayed/neutered?",
+      default: false,
+    });
+  }
+
+  if (selected.has("microchip_id")) {
+    const value = await prompts.input({
+      message: "Microchip ID",
+      default: "",
+    });
+    if (value.trim()) {
+      payload.microchip_id = value.trim();
+    }
+  }
+
+  if (selected.has("good_with")) {
+    const values = await prompts.checkbox({
+      message: "Good with",
+      choices: createSelectChoices(PET_COMPATIBILITIES),
+      pageSize: 12,
+    });
+    if (values.length) {
+      payload.good_with = values;
+    }
+  }
+
+  if (selected.has("bad_with")) {
+    const values = await prompts.checkbox({
+      message: "Bad with",
+      choices: createSelectChoices(PET_COMPATIBILITIES),
+      pageSize: 12,
+    });
+    if (values.length) {
+      payload.bad_with = values;
+    }
+  }
+
+  if (selected.has("temperaments")) {
+    const values = await prompts.checkbox({
+      message: "Temperaments",
+      choices: createSelectChoices(PET_TEMPERAMENTS),
+      pageSize: 12,
+    });
+    if (values.length) {
+      payload.temperaments = values;
+    }
+  }
+
+  if (selected.has("special_needs")) {
+    if (medicalConditionOptions.length) {
+      const values = await prompts.checkbox({
+        message: "Medical conditions / special needs",
+        choices: stringOptionChoices(medicalConditionOptions),
+        pageSize: 12,
+      });
+      if (values.length) {
+        payload.special_needs = values;
+      }
+    } else {
+      const value = await prompts.input({
+        message: "Medical conditions / special needs, comma-separated",
+        default: "",
+      });
+      const specialNeeds = splitCommaSeparated(value);
+      if (specialNeeds.length) {
+        payload.special_needs = specialNeeds;
+      }
+    }
+  }
+
+  if (selected.has("image_urls")) {
+    const value = await prompts.input({
+      message: "Image URLs, comma-separated",
+      default: "",
+    });
+    const imageUrls = splitCommaSeparated(value);
+    if (imageUrls.length) {
+      payload.image_urls = imageUrls;
+    }
+  }
+
+  for (const field of [
+    "coat_length",
+    "custom_id",
+    "intake_date",
+    "outcome_date",
+    "weight",
+    "status_change_notes",
+  ] as const) {
+    if (!selected.has(field)) {
+      continue;
+    }
+    const value = await prompts.input({
+      message: humanizeIdentifier(field),
+      default: "",
+    });
+    if (value.trim()) {
+      payload[field] = value.trim();
+    }
+  }
 }
 
 interface CustomFieldOption {
@@ -593,6 +806,30 @@ function normalizeOptions(options: unknown): CustomFieldOption[] {
       const label = optionLabel(value) || humanizeIdentifier(key);
       return [{ label, value: key }];
     });
+  }
+
+  return [];
+}
+
+function findCustomFieldOptions(
+  fields: unknown,
+  labels: string[],
+): CustomFieldOption[] {
+  const labelSet = new Set(labels.map(normalizeToken));
+  const rawFields = Array.isArray(fields)
+    ? fields
+    : isRecord(fields) && Array.isArray(fields.custom_fields)
+      ? fields.custom_fields
+      : [];
+
+  for (const field of rawFields) {
+    if (!isRecord(field)) {
+      continue;
+    }
+    const label = optionLabel(field.label);
+    if (label && labelSet.has(normalizeToken(label))) {
+      return normalizeOptions(field.options);
+    }
   }
 
   return [];
