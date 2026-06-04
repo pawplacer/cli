@@ -241,11 +241,11 @@ pawplacer pets create --prompt
 pawplacer people create --prompt
 ```
 
-The guide is read-only. The create prompts ask for the required fields and a few
-common optional fields, then submit the payload through the SDK. For
-`people create --prompt`, the CLI fetches custom field definitions for the
-selected person type, shows field labels and configured option labels, and lets
-you choose which optional custom fields to include.
+The guide is read-only. The create prompts ask for the required fields, select
+status from the API-supported options, then submit the payload through the SDK.
+For `pets create --prompt` and `people create --prompt`, the CLI fetches custom
+field definitions, shows field labels and configured option labels, and lets you
+choose which optional custom fields to include.
 
 ## Create From JSON
 

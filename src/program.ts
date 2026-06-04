@@ -125,6 +125,104 @@ class CliUsageError extends Error {
 
 const PERSON_TYPES = ["adopter", "foster", "surrender", "volunteer"] as const;
 const CONTRACT_TYPES = ["adopter", "foster", "surrender", "volunteer"] as const;
+const PET_STATUSES = [
+  "available",
+  "pending",
+  "adopted",
+  "fostered",
+  "hold",
+  "intake",
+  "medicalHold",
+  "medicalTreatment",
+  "quarantine",
+  "recoveryPeriod",
+  "returnedToOwner",
+  "stray",
+  "surrendered",
+  "transferred",
+  "lost",
+  "escaped",
+  "deceased",
+  "euthanized",
+  "archived",
+  "other",
+] as const;
+const PERSON_STATUSES = [
+  "pending",
+  "active",
+  "training",
+  "inactive",
+  "denied",
+  "suspended",
+  "blocked",
+] as const;
+const PET_COLUMN_FIELD_KEYS = new Set([
+  "adoption_fee",
+  "age",
+  "age_category",
+  "age_months",
+  "age_years",
+  "alternative_names",
+  "bad_with",
+  "breed",
+  "breeds",
+  "coat_length",
+  "color",
+  "colors",
+  "custom_id",
+  "custom_status_id",
+  "description",
+  "good_with",
+  "health",
+  "image_urls",
+  "intake_date",
+  "microchip_id",
+  "name",
+  "outcome_date",
+  "photos",
+  "photos_videos",
+  "primary_veterinarian",
+  "primary_veterinarian_id",
+  "sex",
+  "show_public",
+  "size",
+  "spayed",
+  "spayed_neutered",
+  "special_needs",
+  "species",
+  "status",
+  "temperaments",
+  "weight",
+]);
+const PET_COLUMN_FIELD_LABELS = new Set([
+  "adoption fee",
+  "age",
+  "alternative names",
+  "bad with",
+  "breed",
+  "coat length",
+  "color",
+  "custom id",
+  "description",
+  "good with",
+  "health",
+  "intake date",
+  "microchip id",
+  "name",
+  "outcome date",
+  "photos",
+  "photos/videos",
+  "primary veterinarian",
+  "sex",
+  "show public",
+  "size",
+  "spayed/neutered",
+  "special needs",
+  "species",
+  "status",
+  "temperaments",
+  "weight",
+]);
 const PERSON_COLUMN_FIELD_KEYS = new Set([
   "address",
   "capacity",
@@ -300,7 +398,12 @@ async function readPayload(
 
 async function promptForPetPayload(
   prompts: PromptAdapter,
+  loadCustomFields?: () => Promise<unknown>,
 ): Promise<Record<string, unknown>> {
+  const customFields = normalizeCustomFields(
+    await loadCustomFields?.(),
+    isPetColumnField,
+  );
   const payload: Record<string, unknown> = {
     name: await prompts.input({ message: "Pet name", required: true }),
     species: await prompts.select({
@@ -338,10 +441,10 @@ async function promptForPetPayload(
         { name: "Extra large", value: "xLarge" },
       ],
     }),
-    status: await prompts.input({
+    status: await prompts.select({
       message: "Status",
+      choices: createSelectChoices(PET_STATUSES),
       default: "available",
-      required: true,
     }),
     health: await prompts.select({
       message: "Health",
@@ -386,6 +489,11 @@ async function promptForPetPayload(
     default: true,
   });
 
+  const customFieldData = await promptForCustomFieldsPayload(prompts, customFields);
+  if (Object.keys(customFieldData).length) {
+    payload.custom_field_data = customFieldData;
+  }
+
   return payload;
 }
 
@@ -410,6 +518,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function humanizeIdentifier(value: string): string {
   return value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/[_-]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
@@ -418,10 +527,20 @@ function humanizeIdentifier(value: string): string {
 
 function normalizeToken(value: string): string {
   return value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/[_-]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
+}
+
+function createSelectChoices<const T extends readonly string[]>(
+  values: T,
+): { name: string; value: T[number] }[] {
+  return values.map((value) => ({
+    name: humanizeIdentifier(value),
+    value,
+  }));
 }
 
 function optionLabel(value: unknown): string {
@@ -479,6 +598,15 @@ function normalizeOptions(options: unknown): CustomFieldOption[] {
   return [];
 }
 
+function isPetColumnField(fieldKey: string, label: string): boolean {
+  const normalizedKey = normalizeToken(fieldKey).replace(/\s+/g, "_");
+  const normalizedLabel = normalizeToken(label);
+  return (
+    PET_COLUMN_FIELD_KEYS.has(normalizedKey) ||
+    PET_COLUMN_FIELD_LABELS.has(normalizedLabel)
+  );
+}
+
 function isPersonColumnField(fieldKey: string, label: string): boolean {
   const normalizedKey = normalizeToken(fieldKey).replace(/\s+/g, "_");
   const normalizedLabel = normalizeToken(label);
@@ -488,7 +616,10 @@ function isPersonColumnField(fieldKey: string, label: string): boolean {
   );
 }
 
-function normalizeCustomFields(fields: unknown): NormalizedCustomField[] {
+function normalizeCustomFields(
+  fields: unknown,
+  shouldSkipField?: (fieldKey: string, label: string) => boolean,
+): NormalizedCustomField[] {
   const rawFields = Array.isArray(fields)
     ? fields
     : isRecord(fields) && Array.isArray(fields.custom_fields)
@@ -507,7 +638,7 @@ function normalizeCustomFields(fields: unknown): NormalizedCustomField[] {
 
     const fieldType = optionLabel(field.field_type).toLowerCase();
     const label = optionLabel(field.label) || humanizeIdentifier(fieldKey);
-    if (isPersonColumnField(fieldKey, label)) {
+    if (shouldSkipField?.(fieldKey, label)) {
       return [];
     }
 
@@ -697,7 +828,10 @@ async function promptForPersonPayload(
     message: "Person type",
     choices: PERSON_TYPES.map((value) => ({ name: value, value })),
   });
-  const customFields = normalizeCustomFields(await loadCustomFields?.(type));
+  const customFields = normalizeCustomFields(
+    await loadCustomFields?.(type),
+    isPersonColumnField,
+  );
   const payload: Record<string, unknown> = {
     type,
     name: await prompts.input({ message: "Name", required: true }),
@@ -713,13 +847,12 @@ async function promptForPersonPayload(
     }
   }
 
-  const status = await prompts.input({
+  const status = await prompts.select({
     message: "Status",
-    default: type === "adopter" ? "active" : "",
+    choices: createSelectChoices(PERSON_STATUSES),
+    default: type === "adopter" ? "active" : "pending",
   });
-  if (status.trim()) {
-    payload.status = status.trim();
-  }
+  payload.status = status;
 
   if (type === "foster") {
     const capacity = await prompts.number({
@@ -912,7 +1045,9 @@ export function createProgram(deps: ProgramDeps = {}): Command {
     action(fullDeps, async (command, client) => {
       const options = command.opts<CreateCommandOptions>();
       return client.pets.create(
-        await readPayload(options, fullDeps, promptForPetPayload),
+        await readPayload(options, fullDeps, (prompts) =>
+          promptForPetPayload(prompts, () => client.pets.getCustomFields()),
+        ),
         buildCreateOptions(options),
       );
     }),

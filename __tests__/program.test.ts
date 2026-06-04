@@ -129,14 +129,36 @@ describe("pawplacer CLI", () => {
   });
 
   it("builds a pet create payload with prompts", async () => {
+    const client = createMockClient();
+    vi.mocked(client.pets.getCustomFields).mockResolvedValue([
+      {
+        field_key: "name",
+        field_type: "text",
+        label: "Name",
+        required: true,
+      },
+      {
+        field_key: "favorite_toy",
+        field_type: "text",
+        label: "Favorite toy",
+        required: true,
+      },
+      {
+        field_key: "energy_level",
+        field_type: "select",
+        label: "Energy level",
+        options: ["Low", "Medium", "High"],
+        required: false,
+      },
+    ]);
     const prompts = createPrompts({
       confirm: vi.fn().mockResolvedValue(true),
       input: vi
         .fn()
         .mockResolvedValueOnce("Max")
-        .mockResolvedValueOnce("available")
         .mockResolvedValueOnce("Lab, Mix")
-        .mockResolvedValueOnce("Good dog"),
+        .mockResolvedValueOnce("Good dog")
+        .mockResolvedValueOnce("Ball"),
       number: vi.fn().mockResolvedValue(250),
       select: vi
         .fn()
@@ -144,20 +166,45 @@ describe("pawplacer CLI", () => {
         .mockResolvedValueOnce("young")
         .mockResolvedValueOnce("male")
         .mockResolvedValueOnce("medium")
-        .mockResolvedValueOnce("good"),
+        .mockResolvedValueOnce("available")
+        .mockResolvedValueOnce("good")
+        .mockResolvedValueOnce("energy_level")
+        .mockResolvedValueOnce("High")
+        .mockResolvedValueOnce("__pawplacer_done__"),
     });
 
-    const { client } = await runCommand(
+    await runCommand(
       ["--api-key", "key", "pets", "create", "--prompt"],
-      createMockClient(),
+      client,
       { prompts },
     );
 
+    expect(client.pets.getCustomFields).toHaveBeenCalled();
+    expect(prompts.select).toHaveBeenCalledWith(
+      expect.objectContaining({
+        choices: expect.arrayContaining([
+          { name: "Available", value: "available" },
+          { name: "Medical Hold", value: "medicalHold" },
+          { name: "Returned To Owner", value: "returnedToOwner" },
+        ]),
+        default: "available",
+        message: "Status",
+      }),
+    );
+    expect(prompts.input).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Name (required)",
+      }),
+    );
     expect(client.pets.create).toHaveBeenCalledWith(
       {
         adoption_fee: 250,
         age_category: "young",
         breed: ["Lab", "Mix"],
+        custom_field_data: {
+          energy_level: "High",
+          favorite_toy: "Ball",
+        },
         description: "Good dog",
         health: "good",
         name: "Max",
@@ -229,11 +276,11 @@ describe("pawplacer CLI", () => {
         .mockResolvedValueOnce("jane@example.com")
         .mockResolvedValueOnce("")
         .mockResolvedValueOnce("")
-        .mockResolvedValueOnce("active")
         .mockResolvedValueOnce("Has fostered before"),
       select: vi
         .fn()
         .mockResolvedValueOnce("adopter")
+        .mockResolvedValueOnce("active")
         .mockResolvedValueOnce("housing")
         .mockResolvedValueOnce("house")
         .mockResolvedValueOnce("availability")
@@ -245,6 +292,17 @@ describe("pawplacer CLI", () => {
     });
 
     expect(client.people.getCustomFields).toHaveBeenCalledWith("adopter");
+    expect(prompts.select).toHaveBeenCalledWith(
+      expect.objectContaining({
+        choices: expect.arrayContaining([
+          { name: "Pending", value: "pending" },
+          { name: "Active", value: "active" },
+          { name: "Training", value: "training" },
+        ]),
+        default: "active",
+        message: "Status",
+      }),
+    );
     expect(prompts.checkbox).toHaveBeenCalledWith(
       expect.objectContaining({
         choices: [
