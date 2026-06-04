@@ -3,6 +3,7 @@ import process from "node:process";
 
 import packageJson from "../package.json";
 import {
+  checkbox,
   confirm,
   input,
   number,
@@ -37,6 +38,7 @@ export interface ProgramDeps {
 }
 
 export interface PromptAdapter {
+  checkbox: typeof checkbox;
   confirm: typeof confirm;
   input: typeof input;
   number: typeof number;
@@ -195,6 +197,7 @@ function buildCreateOptions(options: CreateCommandOptions): CreateOptions {
 
 function defaultPrompts(): PromptAdapter {
   return {
+    checkbox,
     confirm,
     input,
     number,
@@ -362,13 +365,274 @@ async function promptForPetPayload(
   return payload;
 }
 
+interface CustomFieldOption {
+  label: string;
+  value: unknown;
+}
+
+interface NormalizedCustomField {
+  fieldKey: string;
+  fieldType: string;
+  helpText?: string;
+  label: string;
+  options: CustomFieldOption[];
+  required: boolean;
+  section?: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function humanizeIdentifier(value: string): string {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function optionLabel(value: unknown): string {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return "";
+}
+
+function normalizeOption(option: unknown): CustomFieldOption | undefined {
+  if (isRecord(option)) {
+    const value =
+      option.value ?? option.key ?? option.id ?? option.slug ?? option.label ?? option.name;
+    const label =
+      optionLabel(option.label) ||
+      optionLabel(option.name) ||
+      optionLabel(option.title) ||
+      optionLabel(option.value) ||
+      optionLabel(option.key) ||
+      optionLabel(option.id);
+
+    if (label) {
+      return { label, value: value ?? label };
+    }
+    return undefined;
+  }
+
+  const label = optionLabel(option);
+  return label ? { label, value: option } : undefined;
+}
+
+function normalizeOptions(options: unknown): CustomFieldOption[] {
+  if (Array.isArray(options)) {
+    return options.flatMap((option) => {
+      const normalized = normalizeOption(option);
+      return normalized ? [normalized] : [];
+    });
+  }
+
+  if (isRecord(options)) {
+    return Object.entries(options).flatMap(([key, value]) => {
+      if (isRecord(value)) {
+        const normalized = normalizeOption({ key, ...value });
+        return normalized ? [normalized] : [];
+      }
+
+      const label = optionLabel(value) || humanizeIdentifier(key);
+      return [{ label, value: key }];
+    });
+  }
+
+  return [];
+}
+
+function normalizeCustomFields(fields: unknown): NormalizedCustomField[] {
+  const rawFields = Array.isArray(fields)
+    ? fields
+    : isRecord(fields) && Array.isArray(fields.custom_fields)
+      ? fields.custom_fields
+      : [];
+
+  return rawFields.flatMap((field) => {
+    if (!isRecord(field) || field.hidden === true || field.internal_only === true) {
+      return [];
+    }
+
+    const fieldKey = optionLabel(field.field_key);
+    if (!fieldKey) {
+      return [];
+    }
+
+    const fieldType = optionLabel(field.field_type).toLowerCase();
+    const label = optionLabel(field.label) || humanizeIdentifier(fieldKey);
+    const helpText = optionLabel(field.help_text) || undefined;
+    const section = optionLabel(field.section) || undefined;
+
+    return [
+      {
+        fieldKey,
+        fieldType,
+        helpText,
+        label,
+        options: normalizeOptions(field.options),
+        required: field.required === true,
+        section,
+      },
+    ];
+  });
+}
+
+function formatCustomFieldName(field: NormalizedCustomField): string {
+  const prefix = field.section ? `${field.section}: ` : "";
+  const suffix = field.required ? " (required)" : "";
+  return `${prefix}${field.label}${suffix}`;
+}
+
+function formatCustomFieldDescription(field: NormalizedCustomField): string | undefined {
+  const parts = [
+    field.helpText,
+    field.options.length
+      ? `Options: ${field.options
+          .slice(0, 8)
+          .map((option) => option.label)
+          .join(", ")}${field.options.length > 8 ? ", ..." : ""}`
+      : undefined,
+  ].filter(Boolean);
+
+  return parts.length ? parts.join(" ") : undefined;
+}
+
+function isMultiChoiceField(fieldType: string): boolean {
+  return (
+    fieldType.includes("multi") ||
+    fieldType.includes("checkbox") ||
+    fieldType.includes("tags")
+  );
+}
+
+function isBooleanField(fieldType: string): boolean {
+  return (
+    fieldType.includes("bool") ||
+    fieldType === "yes_no" ||
+    fieldType === "toggle" ||
+    fieldType === "switch"
+  );
+}
+
+function isNumberField(fieldType: string): boolean {
+  return (
+    fieldType.includes("number") ||
+    fieldType.includes("integer") ||
+    fieldType.includes("decimal") ||
+    fieldType.includes("currency")
+  );
+}
+
+async function promptForCustomFieldValue(
+  prompts: PromptAdapter,
+  field: NormalizedCustomField,
+): Promise<unknown> {
+  const message = formatCustomFieldName(field);
+
+  if (field.options.length && isMultiChoiceField(field.fieldType)) {
+    return prompts.checkbox({
+      message,
+      choices: field.options.map((option) => ({
+        name: option.label,
+        value: option.value,
+      })),
+      required: field.required,
+    });
+  }
+
+  if (field.options.length) {
+    return prompts.select({
+      message,
+      choices: field.options.map((option) => ({
+        name: option.label,
+        value: option.value,
+      })),
+    });
+  }
+
+  if (isBooleanField(field.fieldType)) {
+    return prompts.confirm({
+      message,
+      default: false,
+    });
+  }
+
+  if (isNumberField(field.fieldType)) {
+    return prompts.number({
+      message,
+      required: field.required,
+    });
+  }
+
+  return prompts.input({
+    message,
+    default: "",
+    required: field.required,
+  });
+}
+
+async function promptForCustomFieldsPayload(
+  prompts: PromptAdapter,
+  fields: NormalizedCustomField[],
+): Promise<Record<string, unknown>> {
+  if (!fields.length) {
+    return {};
+  }
+
+  const requiredFields = fields.filter((field) => field.required);
+  const optionalFields = fields.filter((field) => !field.required);
+  const selectedOptionalFieldKeys = optionalFields.length
+    ? await prompts.checkbox({
+        message: "Custom fields to add",
+        choices: optionalFields.map((field) => ({
+          name: formatCustomFieldName(field),
+          value: field.fieldKey,
+          description: formatCustomFieldDescription(field),
+        })),
+        pageSize: 12,
+      })
+    : [];
+  const selectedKeys = new Set([
+    ...requiredFields.map((field) => field.fieldKey),
+    ...selectedOptionalFieldKeys,
+  ]);
+  const customFieldData: Record<string, unknown> = {};
+
+  for (const field of fields) {
+    if (!selectedKeys.has(field.fieldKey)) {
+      continue;
+    }
+
+    const value = await promptForCustomFieldValue(prompts, field);
+    if (
+      field.required ||
+      (Array.isArray(value) && value.length > 0) ||
+      (typeof value === "string" && value.trim()) ||
+      (typeof value !== "string" && value !== undefined && value !== null)
+    ) {
+      customFieldData[field.fieldKey] =
+        typeof value === "string" ? value.trim() : value;
+    }
+  }
+
+  return customFieldData;
+}
+
 async function promptForPersonPayload(
   prompts: PromptAdapter,
+  loadCustomFields?: (type: PersonType) => Promise<unknown>,
 ): Promise<Record<string, unknown>> {
   const type = await prompts.select({
     message: "Person type",
     choices: PERSON_TYPES.map((value) => ({ name: value, value })),
   });
+  const customFields = normalizeCustomFields(await loadCustomFields?.(type));
   const payload: Record<string, unknown> = {
     type,
     name: await prompts.input({ message: "Name", required: true }),
@@ -400,6 +664,11 @@ async function promptForPersonPayload(
     if (typeof capacity === "number" && Number.isFinite(capacity)) {
       payload.capacity = capacity;
     }
+  }
+
+  const customFieldData = await promptForCustomFieldsPayload(prompts, customFields);
+  if (Object.keys(customFieldData).length) {
+    payload.custom_field_data = customFieldData;
   }
 
   return payload;
@@ -614,7 +883,11 @@ export function createProgram(deps: ProgramDeps = {}): Command {
     action(fullDeps, async (command, client) => {
       const options = command.opts<CreateCommandOptions>();
       return client.people.create(
-        await readPayload(options, fullDeps, promptForPersonPayload),
+        await readPayload(options, fullDeps, (prompts) =>
+          promptForPersonPayload(prompts, (type) =>
+            client.people.getCustomFields(type),
+          ),
+        ),
         buildCreateOptions(options),
       );
     }),

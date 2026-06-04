@@ -44,6 +44,7 @@ function createMockClient(): PawPlacerClientLike {
 
 function createPrompts(overrides: Record<string, unknown> = {}): any {
   return {
+    checkbox: vi.fn().mockResolvedValue([]),
     confirm: vi.fn().mockResolvedValue(true),
     editor: vi.fn().mockResolvedValue("{}"),
     input: vi.fn().mockResolvedValue(""),
@@ -165,6 +166,99 @@ describe("pawplacer CLI", () => {
         size: "medium",
         species: "dog",
         status: "available",
+      },
+      { idempotencyKey: undefined, retry: undefined },
+    );
+  });
+
+  it("builds a person create payload with prompted custom fields", async () => {
+    const client = createMockClient();
+    vi.mocked(client.people.getCustomFields).mockResolvedValue([
+      {
+        field_key: "experience",
+        field_type: "text",
+        help_text: "Prior pet experience",
+        label: "Experience",
+        required: true,
+      },
+      {
+        field_key: "housing",
+        field_type: "select",
+        label: "Housing type",
+        options: [
+          { label: "Apartment", value: "apartment" },
+          { label: "House", value: "house" },
+        ],
+        required: false,
+        section: "Home",
+      },
+      {
+        field_key: "availability",
+        field_type: "multi_select",
+        label: "Availability",
+        options: ["Weekdays", "Weekends"],
+        required: false,
+      },
+      {
+        field_key: "internal_code",
+        field_type: "text",
+        hidden: true,
+        label: "Internal code",
+        required: false,
+      },
+    ]);
+    const prompts = createPrompts({
+      checkbox: vi
+        .fn()
+        .mockResolvedValueOnce(["housing", "availability"])
+        .mockResolvedValueOnce(["Weekends"]),
+      input: vi
+        .fn()
+        .mockResolvedValueOnce("Jane")
+        .mockResolvedValueOnce("jane@example.com")
+        .mockResolvedValueOnce("")
+        .mockResolvedValueOnce("")
+        .mockResolvedValueOnce("active")
+        .mockResolvedValueOnce("Has fostered before"),
+      select: vi
+        .fn()
+        .mockResolvedValueOnce("adopter")
+        .mockResolvedValueOnce("house"),
+    });
+
+    await runCommand(["--api-key", "key", "people", "create", "--prompt"], client, {
+      prompts,
+    });
+
+    expect(client.people.getCustomFields).toHaveBeenCalledWith("adopter");
+    expect(prompts.checkbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        choices: expect.arrayContaining([
+          expect.objectContaining({
+            description: "Options: Apartment, House",
+            name: "Home: Housing type",
+            value: "housing",
+          }),
+          expect.objectContaining({
+            description: "Options: Weekdays, Weekends",
+            name: "Availability",
+            value: "availability",
+          }),
+        ]),
+        message: "Custom fields to add",
+      }),
+    );
+    expect(client.people.create).toHaveBeenCalledWith(
+      {
+        custom_field_data: {
+          availability: ["Weekends"],
+          experience: "Has fostered before",
+          housing: "house",
+        },
+        email: "jane@example.com",
+        name: "Jane",
+        status: "active",
+        type: "adopter",
       },
       { idempotencyKey: undefined, retry: undefined },
     );
