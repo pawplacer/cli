@@ -15,6 +15,10 @@ Requires Node.js 20 or newer.
 npm install -g pawplacer-cli
 ```
 
+On launch, the CLI checks npm for a newer version at most once every 48 hours.
+If an update is available, it prints an update command to stderr. Set
+`PAWPLACER_NO_UPDATE_CHECK=1` to disable this check.
+
 For local development in this repo:
 
 ```bash
