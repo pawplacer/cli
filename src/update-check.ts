@@ -148,12 +148,34 @@ async function fetchLatestVersion(
 }
 
 function formatUpdateNotice(currentVersion: string, latestVersion: string): string {
+  const command = "npm install -g pawplacer-cli@latest";
+  const rows = [
+    {
+      raw: "↻ Update available",
+      styled: `${chalk.yellow("↻")} ${chalk.bold("Update available")}`,
+    },
+    {
+      raw: `pawplacer-cli ${currentVersion} -> ${latestVersion}`,
+      styled: chalk.gray(`pawplacer-cli ${currentVersion} -> ${latestVersion}`),
+    },
+    {
+      raw: `Run ${command} and restart pawplacer.`,
+      styled: `Run ${chalk.cyan(command)} and restart pawplacer.`,
+    },
+  ];
+  const width = Math.max(56, ...rows.map((row) => row.raw.length));
+  const horizontal = "─".repeat(width + 2);
+
   return [
-    chalk.yellow(
-      `A new pawplacer-cli version is available: ${currentVersion} -> ${latestVersion}.`,
+    chalk.yellow(`┌${horizontal}┐`),
+    ...rows.map(
+      (row) =>
+        `${chalk.yellow("│")} ${row.styled}${" ".repeat(
+          width - row.raw.length,
+        )} ${chalk.yellow("│")}`,
     ),
-    `Run ${chalk.cyan("npm install -g pawplacer-cli@latest")} and restart pawplacer.`,
-  ].join(" ");
+    chalk.yellow(`└${horizontal}┘`),
+  ].join("\n");
 }
 
 export async function checkForUpdates(deps: UpdateCheckDeps = {}): Promise<void> {

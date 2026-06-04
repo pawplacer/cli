@@ -40,9 +40,11 @@ describe("update checks", () => {
       writeFile,
     });
 
-    expect(stderr.value()).toContain(
-      "A new pawplacer-cli version is available: 1.0.1 -> 1.0.2.",
-    );
+    expect(stderr.value()).toContain("┌");
+    expect(stderr.value()).toContain("│ ↻ Update available");
+    expect(stderr.value()).toContain("└");
+    expect(stderr.value()).toContain("↻ Update available");
+    expect(stderr.value()).toContain("pawplacer-cli 1.0.1 -> 1.0.2");
     expect(stderr.value()).toContain("npm install -g pawplacer-cli@latest");
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(writeFile).toHaveBeenCalledWith(
