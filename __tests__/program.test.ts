@@ -38,6 +38,7 @@ function createMockClient(): PawPlacerClientLike {
       getCustomFields: vi.fn().mockResolvedValue([]),
       list: vi.fn().mockResolvedValue({ data: [], total: 0 }),
       search: vi.fn().mockResolvedValue([]),
+      update: vi.fn().mockResolvedValue({ id: "pet-1" }),
     },
   };
 }
@@ -126,6 +127,32 @@ describe("pawplacer CLI", () => {
       { type: "adopter", name: "Jane" },
       { idempotencyKey: "people:jane", retry: undefined },
     );
+  });
+
+  it("updates pets from inline JSON with idempotency options", async () => {
+    const { client } = await runCommand([
+      "--api-key",
+      "key",
+      "pets",
+      "update",
+      "pet-1",
+      "--json",
+      '{"description":"Updated bio","status":"available"}',
+      "--idempotency-key",
+      "pet:pet-1:update",
+    ]);
+
+    expect(client.pets.update).toHaveBeenCalledWith(
+      "pet-1",
+      { description: "Updated bio", status: "available" },
+      { idempotencyKey: "pet:pet-1:update", retry: undefined },
+    );
+  });
+
+  it("mentions --prompt when update payload source is missing", async () => {
+    await expect(
+      runCommand(["--api-key", "key", "pets", "update", "pet-1"]),
+    ).rejects.toThrow("--prompt");
   });
 
   it("builds a pet create payload with prompts", async () => {

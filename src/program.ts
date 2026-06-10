@@ -71,6 +71,11 @@ export interface PawPlacerClientLike {
     getCustomFields: () => Promise<unknown>;
     list: (params?: PetListParams) => Promise<unknown>;
     search: (query: string) => Promise<unknown>;
+    update: (
+      id: string,
+      payload: unknown,
+      options?: CreateOptions,
+    ) => Promise<unknown>;
   };
 }
 
@@ -552,6 +557,212 @@ async function promptForPetPayload(
   return payload;
 }
 
+async function promptForPetUpdatePayload(
+  prompts: PromptAdapter,
+  loadCustomFields?: () => Promise<unknown>,
+): Promise<Record<string, unknown>> {
+  const customFieldsResponse = await loadCustomFields?.();
+  const customFields = normalizeCustomFields(
+    customFieldsResponse,
+    isPetColumnField,
+  ).map((field) => ({ ...field, required: false }));
+  const medicalConditionOptions = findCustomFieldOptions(customFieldsResponse, [
+    "Medical Conditions",
+    "Special Needs",
+  ]);
+  const selectedFields = await prompts.checkbox({
+    message: "Pet fields to update",
+    choices: [
+      { name: "Name", value: "name" },
+      { name: "Species", value: "species" },
+      { name: "Age category", value: "age_category" },
+      { name: "Age years", value: "age_years" },
+      { name: "Age months", value: "age_months" },
+      { name: "Age birthday", value: "age_birthday" },
+      { name: "Sex", value: "sex" },
+      { name: "Size", value: "size" },
+      { name: "Status", value: "status" },
+      { name: "Health", value: "health" },
+      { name: "Description", value: "description" },
+      { name: "Breed", value: "breed" },
+      { name: "Adoption fee", value: "adoption_fee" },
+      { name: "Show publicly", value: "show_public" },
+      { name: "Color", value: "color" },
+      { name: "Spayed/neutered", value: "spayed" },
+      { name: "Microchip ID", value: "microchip_id" },
+      { name: "Good with", value: "good_with" },
+      { name: "Bad with", value: "bad_with" },
+      { name: "Temperaments", value: "temperaments" },
+      { name: "Medical conditions / special needs", value: "special_needs" },
+      { name: "Image URLs", value: "image_urls" },
+      { name: "Coat length", value: "coat_length" },
+      { name: "Custom ID", value: "custom_id" },
+      { name: "Custom status ID", value: "custom_status_id" },
+      { name: "Intake date", value: "intake_date" },
+      { name: "Outcome date", value: "outcome_date" },
+      { name: "Weight", value: "weight" },
+      { name: "Status change notes", value: "status_change_notes" },
+      { name: "Custom fields", value: "custom_field_data" },
+    ],
+    pageSize: 18,
+  });
+  const selected = new Set(selectedFields);
+  const payload: Record<string, unknown> = {};
+
+  if (selected.has("name")) {
+    const value = await prompts.input({ message: "Pet name", required: true });
+    if (value.trim()) {
+      payload.name = value.trim();
+    }
+  }
+
+  if (selected.has("species")) {
+    payload.species = await prompts.select({
+      message: "Species",
+      choices: [
+        { name: "Dog", value: "dog" },
+        { name: "Cat", value: "cat" },
+        { name: "Rabbit", value: "rabbit" },
+      ],
+    });
+  }
+
+  if (selected.has("age_category")) {
+    payload.age_category = await prompts.select({
+      message: "Age category",
+      choices: [
+        { name: "Youngest", value: "youngest" },
+        { name: "Young", value: "young" },
+        { name: "Adult", value: "adult" },
+        { name: "Senior", value: "senior" },
+      ],
+    });
+  }
+
+  if (selected.has("sex")) {
+    payload.sex = await prompts.select({
+      message: "Sex",
+      choices: [
+        { name: "Male", value: "male" },
+        { name: "Female", value: "female" },
+        { name: "Unknown", value: "unknown" },
+      ],
+    });
+  }
+
+  if (selected.has("size")) {
+    payload.size = await prompts.select({
+      message: "Size",
+      choices: [
+        { name: "Extra small", value: "xSmall" },
+        { name: "Small", value: "small" },
+        { name: "Medium", value: "medium" },
+        { name: "Large", value: "large" },
+        { name: "Extra large", value: "xLarge" },
+      ],
+    });
+  }
+
+  if (selected.has("status")) {
+    payload.status = await prompts.select({
+      message: "Status",
+      choices: createSelectChoices(PET_STATUSES),
+      default: "available",
+    });
+  }
+
+  if (selected.has("health")) {
+    payload.health = await prompts.select({
+      message: "Health",
+      choices: [
+        { name: "Unknown", value: "unknown" },
+        { name: "Poor", value: "poor" },
+        { name: "Good", value: "good" },
+        { name: "Great", value: "great" },
+      ],
+    });
+  }
+
+  for (const field of [
+    "age_years",
+    "age_months",
+    "age_birthday",
+    "custom_status_id",
+  ] as const) {
+    if (!selected.has(field)) {
+      continue;
+    }
+    const value = await prompts.input({
+      message: humanizeIdentifier(field),
+      default: "",
+    });
+    if (value.trim()) {
+      payload[field] = value.trim();
+    }
+  }
+
+  if (selected.has("description")) {
+    const value = await prompts.input({
+      message: "Description",
+      default: "",
+    });
+    if (value.trim()) {
+      payload.description = value.trim();
+    }
+  }
+
+  if (selected.has("breed")) {
+    const value = await prompts.input({
+      message: "Breed names, comma-separated",
+      default: "",
+    });
+    const breed = splitCommaSeparated(value);
+    if (breed.length) {
+      payload.breed = breed;
+    }
+  }
+
+  if (selected.has("adoption_fee")) {
+    const adoptionFee = await prompts.number({
+      message: "Adoption fee",
+      default: undefined,
+    });
+    if (typeof adoptionFee === "number" && Number.isFinite(adoptionFee)) {
+      payload.adoption_fee = adoptionFee;
+    }
+  }
+
+  if (selected.has("show_public")) {
+    payload.show_public = await prompts.confirm({
+      message: "Show publicly?",
+      default: true,
+    });
+  }
+
+  await promptForAdditionalPetDetails(
+    prompts,
+    payload,
+    medicalConditionOptions,
+    selectedFields,
+  );
+
+  if (selected.has("custom_field_data")) {
+    const customFieldData = await promptForCustomFieldsPayload(
+      prompts,
+      customFields,
+    );
+    if (Object.keys(customFieldData).length) {
+      payload.custom_field_data = customFieldData;
+    }
+  }
+
+  if (Object.keys(payload).length === 0) {
+    throw new CliUsageError("Select at least one pet field to update");
+  }
+
+  return payload;
+}
+
 function splitCommaSeparated(value: string): string[] {
   return value
     .split(",")
@@ -572,27 +783,30 @@ async function promptForAdditionalPetDetails(
   prompts: PromptAdapter,
   payload: Record<string, unknown>,
   medicalConditionOptions: CustomFieldOption[],
+  selectedFieldKeys?: string[],
 ): Promise<void> {
-  const selectedDetails = await prompts.checkbox({
-    message: "Additional pet details to add",
-    choices: [
-      { name: "Color", value: "color" },
-      { name: "Spayed/neutered", value: "spayed" },
-      { name: "Microchip ID", value: "microchip_id" },
-      { name: "Good with", value: "good_with" },
-      { name: "Bad with", value: "bad_with" },
-      { name: "Temperaments", value: "temperaments" },
-      { name: "Medical conditions / special needs", value: "special_needs" },
-      { name: "Image URLs", value: "image_urls" },
-      { name: "Coat length", value: "coat_length" },
-      { name: "Custom ID", value: "custom_id" },
-      { name: "Intake date", value: "intake_date" },
-      { name: "Outcome date", value: "outcome_date" },
-      { name: "Weight", value: "weight" },
-      { name: "Status change notes", value: "status_change_notes" },
-    ],
-    pageSize: 14,
-  });
+  const selectedDetails =
+    selectedFieldKeys ??
+    (await prompts.checkbox({
+      message: "Additional pet details to add",
+      choices: [
+        { name: "Color", value: "color" },
+        { name: "Spayed/neutered", value: "spayed" },
+        { name: "Microchip ID", value: "microchip_id" },
+        { name: "Good with", value: "good_with" },
+        { name: "Bad with", value: "bad_with" },
+        { name: "Temperaments", value: "temperaments" },
+        { name: "Medical conditions / special needs", value: "special_needs" },
+        { name: "Image URLs", value: "image_urls" },
+        { name: "Coat length", value: "coat_length" },
+        { name: "Custom ID", value: "custom_id" },
+        { name: "Intake date", value: "intake_date" },
+        { name: "Outcome date", value: "outcome_date" },
+        { name: "Weight", value: "weight" },
+        { name: "Status change notes", value: "status_change_notes" },
+      ],
+      pageSize: 14,
+    }));
   const selected = new Set(selectedDetails);
 
   if (selected.has("color")) {
@@ -1193,7 +1407,7 @@ function addPayloadOptions(command: Command): Command {
     .option("--stdin", "read JSON payload from stdin")
     .option("--idempotency-key <key>", "stable idempotency key for safe retries")
     .option("--no-auto-idempotency-key", "disable automatic idempotency key")
-    .option("--retry", "enable POST retry when an idempotency key is present");
+    .option("--retry", "enable write retry when an idempotency key is present");
 }
 
 export function formatError(error: unknown): string {
@@ -1284,6 +1498,25 @@ export function createProgram(deps: ProgramDeps = {}): Command {
       return client.pets.create(
         await readPayload(options, fullDeps, (prompts) =>
           promptForPetPayload(prompts, () => client.pets.getCustomFields()),
+        ),
+        buildCreateOptions(options),
+      );
+    }),
+  );
+  addPayloadOptions(
+    pets
+      .command("update")
+      .description("Update a pet")
+      .argument("<id>", "pet ID"),
+  ).action(
+    action(fullDeps, async (command, client) => {
+      const options = command.opts<CreateCommandOptions>();
+      return client.pets.update(
+        command.args[0]!,
+        await readPayload(options, fullDeps, (prompts) =>
+          promptForPetUpdatePayload(prompts, () =>
+            client.pets.getCustomFields(),
+          ),
         ),
         buildCreateOptions(options),
       );

@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - JSON-first commands for pets, people, adoption fees, and contracts.
 - Interactive `pawplacer guide` for common read-only workflows.
 - Prompt-based `pets create --prompt` and `people create --prompt`.
+- `pets update <id>` for partial pet updates through JSON, file, stdin, or prompt payloads.
 - Friendly colored error output with `chalk`.
 - Typecheck, test, and build scripts.
 
