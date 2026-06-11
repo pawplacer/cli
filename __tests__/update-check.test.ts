@@ -25,7 +25,7 @@ function response(version: string): Response {
 describe("update checks", () => {
   it("prints an update notice when npm has a newer version", async () => {
     const stderr = outputBuffer();
-    const fetchImpl = vi.fn().mockResolvedValue(response("1.0.2"));
+    const fetchImpl = vi.fn().mockResolvedValue(response("1.1.1"));
     const mkdir = vi.fn().mockResolvedValue(undefined);
     const writeFile = vi.fn().mockResolvedValue(undefined);
 
@@ -44,12 +44,12 @@ describe("update checks", () => {
     expect(stderr.value()).toContain("│ ↻ Update available");
     expect(stderr.value()).toContain("└");
     expect(stderr.value()).toContain("↻ Update available");
-    expect(stderr.value()).toContain("pawplacer-cli 1.0.1 -> 1.0.2");
+    expect(stderr.value()).toContain("pawplacer-cli 1.1.0 -> 1.1.1");
     expect(stderr.value()).toContain("npm install -g pawplacer-cli@latest");
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(writeFile).toHaveBeenCalledWith(
       "/tmp/pawplacer-cli-test/update-check.json",
-      `${JSON.stringify({ checkedAt: 1000, latestVersion: "1.0.2" })}\n`,
+      `${JSON.stringify({ checkedAt: 1000, latestVersion: "1.1.1" })}\n`,
       "utf8",
     );
   });
@@ -64,13 +64,13 @@ describe("update checks", () => {
       fetch: fetchImpl,
       now: () => 48 * 60 * 60 * 1000 - 1,
       readFile: vi.fn().mockResolvedValue(
-        JSON.stringify({ checkedAt: 0, latestVersion: "1.0.2" }),
+        JSON.stringify({ checkedAt: 0, latestVersion: "1.1.1" }),
       ),
       stderr: stderr.stream,
     });
 
     expect(fetchImpl).not.toHaveBeenCalled();
-    expect(stderr.value()).toContain("1.0.1 -> 1.0.2");
+    expect(stderr.value()).toContain("1.1.0 -> 1.1.1");
   });
 
   it("does not print or fetch when disabled", async () => {

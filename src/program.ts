@@ -1507,7 +1507,7 @@ export function createProgram(deps: ProgramDeps = {}): Command {
     pets
       .command("update")
       .description("Update a pet")
-      .argument("<id>", "pet ID"),
+      .argument("<id-or-custom-id>", "PawPlacer pet UUID or assigned custom_id"),
   ).action(
     action(fullDeps, async (command, client) => {
       const options = command.opts<CreateCommandOptions>();

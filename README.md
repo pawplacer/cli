@@ -47,7 +47,7 @@ without a key, it prompts for one.
 pawplacer guide
 pawplacer pets list --status available --species dog --limit 20
 pawplacer pets get pet-uuid
-pawplacer pets update pet-uuid --json '{"description":"Updated bio"}'
+pawplacer pets update DOG-2026-001 --json '{"description":"Updated bio"}'
 pawplacer people list --type adopter --status active
 pawplacer adoption-fees
 pawplacer contracts --type adopter
@@ -145,10 +145,10 @@ Larger `pet.json` with common optional fields:
 pawplacer pets create --file pet.json --idempotency-key "pet:DOG-2026-001"
 ```
 
-Update an existing pet by PawPlacer UUID with a partial payload:
+Update an existing pet by PawPlacer UUID or assigned `custom_id` with a partial payload:
 
 ```bash
-pawplacer pets update pet-uuid --json '{"description":"Updated bio","status":"available"}' --idempotency-key "pet:pet-uuid:update"
+pawplacer pets update DOG-2026-001 --json '{"description":"Updated bio","status":"available"}' --idempotency-key "pet:DOG-2026-001:update"
 ```
 
 Larger foster JSON:
@@ -245,7 +245,7 @@ The CLI uses prompts for common beginner workflows:
 ```bash
 pawplacer guide
 pawplacer pets create --prompt
-pawplacer pets update pet-uuid --prompt
+pawplacer pets update DOG-2026-001 --prompt
 pawplacer people create --prompt
 ```
 
@@ -263,7 +263,7 @@ For repeatable scripts, prefer files or stdin:
 
 ```bash
 pawplacer pets create --file pet.json
-pawplacer pets update pet-uuid --file pet-update.json
+pawplacer pets update DOG-2026-001 --file pet-update.json
 pawplacer people create --json '{"type":"adopter","name":"Jane Smith"}'
 cat pet.json | pawplacer pets create --stdin
 ```
@@ -272,7 +272,7 @@ Create and update commands send an idempotency key by default. To use a stable k
 
 ```bash
 pawplacer pets create --file pet.json --idempotency-key "pet:external-123"
-pawplacer pets update pet-uuid --file pet-update.json --idempotency-key "pet:external-123:update"
+pawplacer pets update DOG-2026-001 --file pet-update.json --idempotency-key "pet:DOG-2026-001:update"
 ```
 
 Disable automatic idempotency only when you understand the retry tradeoff:
@@ -292,8 +292,8 @@ pawplacer pets search <query>
 pawplacer pets status <status>
 pawplacer pets create --file pet.json
 pawplacer pets create --prompt
-pawplacer pets update <id> --file pet-update.json
-pawplacer pets update <id> --prompt
+pawplacer pets update <id-or-custom-id> --file pet-update.json
+pawplacer pets update <id-or-custom-id> --prompt
 pawplacer pets custom-fields
 ```
 

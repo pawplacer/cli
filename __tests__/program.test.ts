@@ -135,17 +135,17 @@ describe("pawplacer CLI", () => {
       "key",
       "pets",
       "update",
-      "pet-1",
+      "DOG-2026-001",
       "--json",
       '{"description":"Updated bio","status":"available"}',
       "--idempotency-key",
-      "pet:pet-1:update",
+      "pet:DOG-2026-001:update",
     ]);
 
     expect(client.pets.update).toHaveBeenCalledWith(
-      "pet-1",
+      "DOG-2026-001",
       { description: "Updated bio", status: "available" },
-      { idempotencyKey: "pet:pet-1:update", retry: undefined },
+      { idempotencyKey: "pet:DOG-2026-001:update", retry: undefined },
     );
   });
 

@@ -7,13 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-11
+
+### Added
+
+- `pets update <id-or-custom-id>` for partial pet updates by PawPlacer UUID or assigned `custom_id` through JSON, file, stdin, or prompt payloads.
+
+## [1.0.1]
+
 ### Added
 
 - Initial CLI package with `pawplacer` binary.
 - JSON-first commands for pets, people, adoption fees, and contracts.
 - Interactive `pawplacer guide` for common read-only workflows.
 - Prompt-based `pets create --prompt` and `people create --prompt`.
-- `pets update <id>` for partial pet updates through JSON, file, stdin, or prompt payloads.
 - Friendly colored error output with `chalk`.
 - Typecheck, test, and build scripts.
 
