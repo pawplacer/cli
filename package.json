@@ -1,6 +1,6 @@
 {
   "name": "pawplacer-cli",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Command-line interface for the PawPlacer API",
   "license": "MIT",
   "author": "PawPlacer",
@@ -23,8 +23,11 @@
   ],
   "scripts": {
     "build": "tsup",
-    "check": "npm run typecheck && npm test && npm run build",
+    "check": "npm run lint && npm run format:check && npm run typecheck && npm test && npm run build",
     "dev": "tsx src/cli.ts",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "lint": "biome lint --error-on-warnings .",
     "pack:dry-run": "npm pack --dry-run",
     "prepack": "npm run build",
     "prepublishOnly": "npm run check",
@@ -47,9 +50,10 @@
     "@inquirer/prompts": "^8.5.2",
     "chalk": "^5.6.2",
     "commander": "^14.0.2",
-    "pawplacer-sdk": "^1.5.0"
+    "pawplacer-sdk": "^1.6.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.8",
     "@types/node": "^25.9.1",
     "tsup": "^8.5.1",
     "tsx": "^4.20.6",

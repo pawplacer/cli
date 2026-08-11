@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createProgram, type PawPlacerClientLike } from "../src/program";
+import {
+  createProgram,
+  type PawPlacerClientLike,
+  type ProgramDeps,
+  type PromptAdapter,
+} from "../src/program";
 
 function outputBuffer() {
   let value = "";
@@ -43,11 +48,10 @@ function createMockClient(): PawPlacerClientLike {
   };
 }
 
-function createPrompts(overrides: Record<string, unknown> = {}): any {
+function createPrompts(overrides: Partial<PromptAdapter> = {}): PromptAdapter {
   return {
     checkbox: vi.fn().mockResolvedValue([]),
     confirm: vi.fn().mockResolvedValue(true),
-    editor: vi.fn().mockResolvedValue("{}"),
     input: vi.fn().mockResolvedValue(""),
     number: vi.fn().mockResolvedValue(undefined),
     password: vi.fn().mockResolvedValue("prompt-key"),
@@ -59,7 +63,7 @@ function createPrompts(overrides: Record<string, unknown> = {}): any {
 async function runCommand(
   args: string[],
   client = createMockClient(),
-  extraDeps: Record<string, unknown> = {},
+  extraDeps: Partial<ProgramDeps> = {},
 ) {
   const stdout = outputBuffer();
   const stderr = outputBuffer();
@@ -319,20 +323,32 @@ describe("pawplacer CLI", () => {
       {
         field_key: "housing",
         field_type: "select",
+        field_order: 1,
         label: "Housing type",
         options: [
           { label: "Apartment", value: "apartment" },
           { label: "House", value: "house" },
         ],
+        placeholder: "Choose housing",
         required: false,
         section: "Home",
+        section_order: 1,
       },
       {
         field_key: "availability",
         field_type: "multi_select",
+        field_order: 1,
         label: "Availability",
         options: ["Weekdays", "Weekends"],
         required: false,
+        section_order: 2,
+      },
+      {
+        field_key: "legal_name",
+        field_type: "text",
+        label: "Applicant name",
+        required: true,
+        sync_to_column: "full_name",
       },
       {
         field_key: "internal_code",
@@ -344,6 +360,7 @@ describe("pawplacer CLI", () => {
     ]);
     const prompts = createPrompts({
       checkbox: vi.fn().mockResolvedValueOnce(["Weekends"]),
+      confirm: vi.fn().mockResolvedValue(false),
       input: vi
         .fn()
         .mockResolvedValueOnce("Jane")
@@ -361,9 +378,13 @@ describe("pawplacer CLI", () => {
         .mockResolvedValueOnce("__pawplacer_done__"),
     });
 
-    await runCommand(["--api-key", "key", "people", "create", "--prompt"], client, {
-      prompts,
-    });
+    await runCommand(
+      ["--api-key", "key", "people", "create", "--prompt"],
+      client,
+      {
+        prompts,
+      },
+    );
 
     expect(client.people.getCustomFields).toHaveBeenCalledWith("adopter");
     expect(prompts.select).toHaveBeenCalledWith(
@@ -390,7 +411,7 @@ describe("pawplacer CLI", () => {
       expect.objectContaining({
         choices: expect.arrayContaining([
           expect.objectContaining({
-            description: "Options: Apartment, House",
+            description: "Example: Choose housing Options: Apartment, House",
             name: "Home: Housing type",
             value: "housing",
           }),
@@ -412,6 +433,11 @@ describe("pawplacer CLI", () => {
         message: "Personal Information: Full Name (required)",
       }),
     );
+    expect(prompts.input).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining("Applicant name"),
+      }),
+    );
     expect(client.people.create).toHaveBeenCalledWith(
       {
         custom_field_data: {
@@ -426,6 +452,88 @@ describe("pawplacer CLI", () => {
       },
       { idempotencyKey: undefined, retry: undefined },
     );
+  });
+
+  it("builds an adopter application after rendering and accepting the contract", async () => {
+    const client = createMockClient();
+    const prompts = createPrompts({
+      confirm: vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(true),
+      input: vi
+        .fn()
+        .mockResolvedValueOnce("Jane Applicant")
+        .mockResolvedValueOnce("jane@example.com")
+        .mockResolvedValueOnce("")
+        .mockResolvedValueOnce("")
+        .mockResolvedValueOnce("pet-1, pet-2"),
+      select: vi.fn().mockResolvedValueOnce("adopter"),
+    });
+
+    const { stderr } = await runCommand(
+      ["--api-key", "key", "people", "create", "--prompt"],
+      client,
+      { prompts },
+    );
+
+    expect(client.contracts.get).toHaveBeenCalledWith("adopter");
+    expect(stderr.value()).toContain("Adopter contract");
+    expect(stderr.value()).toContain("terms");
+    expect(client.people.create).toHaveBeenCalledWith(
+      {
+        application: {
+          pet_ids: ["pet-1", "pet-2"],
+          terms_accepted: true,
+        },
+        email: "jane@example.com",
+        name: "Jane Applicant",
+        status: "pending",
+        type: "adopter",
+      },
+      { idempotencyKey: undefined, retry: undefined },
+    );
+  });
+
+  it("does not submit an application when contract terms are refused", async () => {
+    const client = createMockClient();
+    const prompts = createPrompts({
+      confirm: vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false),
+      input: vi
+        .fn()
+        .mockResolvedValueOnce("Jane Applicant")
+        .mockResolvedValueOnce("jane@example.com")
+        .mockResolvedValueOnce("")
+        .mockResolvedValueOnce("")
+        .mockResolvedValueOnce("pet-1"),
+      select: vi.fn().mockResolvedValueOnce("adopter"),
+    });
+
+    await expect(
+      runCommand(["--api-key", "key", "people", "create", "--prompt"], client, {
+        prompts,
+      }),
+    ).rejects.toThrow("Contract terms must be accepted");
+    expect(client.people.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects duplicate application pet IDs before submission", async () => {
+    const client = createMockClient();
+    const prompts = createPrompts({
+      confirm: vi.fn().mockResolvedValueOnce(true),
+      input: vi
+        .fn()
+        .mockResolvedValueOnce("Jane Applicant")
+        .mockResolvedValueOnce("jane@example.com")
+        .mockResolvedValueOnce("")
+        .mockResolvedValueOnce("")
+        .mockResolvedValueOnce("pet-1, pet-1"),
+      select: vi.fn().mockResolvedValueOnce("adopter"),
+    });
+
+    await expect(
+      runCommand(["--api-key", "key", "people", "create", "--prompt"], client, {
+        prompts,
+      }),
+    ).rejects.toThrow("Application pet IDs must be unique");
+    expect(client.people.create).not.toHaveBeenCalled();
   });
 
   it("prompts for an API key in interactive mode", async () => {
@@ -460,7 +568,93 @@ describe("pawplacer CLI", () => {
       type: "volunteer",
       limit: 20,
     });
+    expect(prompts.select).toHaveBeenCalledWith(
+      expect.objectContaining({
+        choices: expect.arrayContaining([
+          { name: "List pets by status", value: "pets:status" },
+          { name: "View pet custom fields", value: "pets:custom-fields" },
+          { name: "Search people", value: "people:search" },
+          {
+            name: "View people custom fields",
+            value: "people:custom-fields",
+          },
+          { name: "View contract terms", value: "contracts" },
+        ]),
+        message: "What do you want to do?",
+      }),
+    );
     expect(stderr.value()).toContain("PawPlacer guide");
+  });
+
+  it("searches people through the guided flow", async () => {
+    const prompts = createPrompts({
+      input: vi.fn().mockResolvedValueOnce("Jane"),
+      select: vi
+        .fn()
+        .mockResolvedValueOnce("people:search")
+        .mockResolvedValueOnce("adopter"),
+    });
+    const { client } = await runCommand(
+      ["--api-key", "key", "guide"],
+      createMockClient(),
+      { prompts },
+    );
+
+    expect(client.people.list).toHaveBeenCalledWith({
+      type: "adopter",
+      search: "Jane",
+      limit: 20,
+    });
+  });
+
+  it("filters pets by status through the guided flow", async () => {
+    const prompts = createPrompts({
+      select: vi
+        .fn()
+        .mockResolvedValueOnce("pets:status")
+        .mockResolvedValueOnce("medicalHold"),
+    });
+    const { client } = await runCommand(
+      ["--api-key", "key", "guide"],
+      createMockClient(),
+      { prompts },
+    );
+
+    expect(client.pets.getByStatus).toHaveBeenCalledWith("medicalHold");
+  });
+
+  it("fetches people custom fields through the guided flow", async () => {
+    const prompts = createPrompts({
+      select: vi
+        .fn()
+        .mockResolvedValueOnce("people:custom-fields")
+        .mockResolvedValueOnce("foster"),
+    });
+    const { client } = await runCommand(
+      ["--api-key", "key", "guide"],
+      createMockClient(),
+      { prompts },
+    );
+
+    expect(client.people.getCustomFields).toHaveBeenCalledWith("foster");
+  });
+
+  it("keeps custom-field and contract commands available directly", async () => {
+    const client = createMockClient();
+
+    await runCommand(["--api-key", "key", "pets", "custom-fields"], client);
+    await runCommand(
+      ["--api-key", "key", "people", "custom-fields", "--type", "volunteer"],
+      client,
+    );
+    await runCommand(
+      ["--api-key", "key", "contracts", "--type", "surrender"],
+      client,
+    );
+
+    expect(client.pets.getCustomFields).toHaveBeenCalledOnce();
+    expect(client.people.getCustomFields).toHaveBeenCalledWith("volunteer");
+    expect(client.contracts.get).toHaveBeenCalledWith("surrender");
   });
 
   it("fails with a clear message when no API key is available", async () => {

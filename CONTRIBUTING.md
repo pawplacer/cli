@@ -27,7 +27,14 @@ Run the full local check:
 npm run check
 ```
 
-This runs type checks, tests, and a production build.
+This runs linting, formatting checks, type checks, tests, and a production
+build.
+
+To apply the repository's formatter:
+
+```bash
+npm run format
+```
 
 To inspect the npm package contents locally:
 

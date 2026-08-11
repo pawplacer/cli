@@ -152,14 +152,11 @@ const PET_STATUSES = [
   "archived",
   "other",
 ] as const;
-const PERSON_STATUSES = [
+const PERSON_CREATE_STATUSES = [
   "pending",
   "active",
   "training",
   "inactive",
-  "denied",
-  "suspended",
-  "blocked",
 ] as const;
 const PET_COMPATIBILITIES = [
   "activeLifestyle",
@@ -316,6 +313,18 @@ function optionalString(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+function requireCommandArgument(
+  command: Command,
+  index: number,
+  name: string,
+): string {
+  const value = command.args[index];
+  if (typeof value !== "string" || !value.trim()) {
+    throw new CliUsageError(`${name} is required`);
+  }
+  return value;
+}
+
 function requirePersonType(value: string | undefined): PersonType {
   if (PERSON_TYPES.includes(value as PersonType)) {
     return value as PersonType;
@@ -385,7 +394,10 @@ async function defaultReadStdin(): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-function parseJsonObject(source: string, label: string): Record<string, unknown> {
+function parseJsonObject(
+  source: string,
+  label: string,
+): Record<string, unknown> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(source);
@@ -403,9 +415,7 @@ function parseJsonObject(source: string, label: string): Record<string, unknown>
 async function readPayload(
   options: PayloadOptions,
   deps: Required<Pick<ProgramDeps, "readFile" | "readStdin" | "prompts">>,
-  promptBuilder?: (
-    prompts: PromptAdapter,
-  ) => Promise<Record<string, unknown>>,
+  promptBuilder?: (prompts: PromptAdapter) => Promise<Record<string, unknown>>,
 ): Promise<Record<string, unknown>> {
   const sources = [
     options.file !== undefined,
@@ -549,7 +559,10 @@ async function promptForPetPayload(
     default: true,
   });
 
-  const customFieldData = await promptForCustomFieldsPayload(prompts, customFields);
+  const customFieldData = await promptForCustomFieldsPayload(
+    prompts,
+    customFields,
+  );
   if (Object.keys(customFieldData).length) {
     payload.custom_field_data = customFieldData;
   }
@@ -932,11 +945,14 @@ interface CustomFieldOption {
 interface NormalizedCustomField {
   fieldKey: string;
   fieldType: string;
+  fieldOrder?: number;
   helpText?: string;
   label: string;
   options: CustomFieldOption[];
+  placeholder?: string;
   required: boolean;
   section?: string;
+  sectionOrder?: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -983,7 +999,12 @@ function optionLabel(value: unknown): string {
 function normalizeOption(option: unknown): CustomFieldOption | undefined {
   if (isRecord(option)) {
     const value =
-      option.value ?? option.key ?? option.id ?? option.slug ?? option.label ?? option.name;
+      option.value ??
+      option.key ??
+      option.id ??
+      option.slug ??
+      option.label ??
+      option.name;
     const label =
       optionLabel(option.label) ||
       optionLabel(option.name) ||
@@ -1049,27 +1070,49 @@ function findCustomFieldOptions(
   return [];
 }
 
-function isPetColumnField(fieldKey: string, label: string): boolean {
+function isPetColumnField(
+  fieldKey: string,
+  label: string,
+  syncToColumn?: string,
+): boolean {
   const normalizedKey = normalizeToken(fieldKey).replace(/\s+/g, "_");
   const normalizedLabel = normalizeToken(label);
+  const normalizedColumn = syncToColumn
+    ? normalizeToken(syncToColumn).replace(/\s+/g, "_")
+    : undefined;
   return (
     PET_COLUMN_FIELD_KEYS.has(normalizedKey) ||
+    (normalizedColumn !== undefined &&
+      PET_COLUMN_FIELD_KEYS.has(normalizedColumn)) ||
     PET_COLUMN_FIELD_LABELS.has(normalizedLabel)
   );
 }
 
-function isPersonColumnField(fieldKey: string, label: string): boolean {
+function isPersonColumnField(
+  fieldKey: string,
+  label: string,
+  syncToColumn?: string,
+): boolean {
   const normalizedKey = normalizeToken(fieldKey).replace(/\s+/g, "_");
   const normalizedLabel = normalizeToken(label);
+  const normalizedColumn = syncToColumn
+    ? normalizeToken(syncToColumn).replace(/\s+/g, "_")
+    : undefined;
   return (
     PERSON_COLUMN_FIELD_KEYS.has(normalizedKey) ||
+    (normalizedColumn !== undefined &&
+      PERSON_COLUMN_FIELD_KEYS.has(normalizedColumn)) ||
     PERSON_COLUMN_FIELD_LABELS.has(normalizedLabel)
   );
 }
 
 function normalizeCustomFields(
   fields: unknown,
-  shouldSkipField?: (fieldKey: string, label: string) => boolean,
+  shouldSkipField?: (
+    fieldKey: string,
+    label: string,
+    syncToColumn?: string,
+  ) => boolean,
 ): NormalizedCustomField[] {
   const rawFields = Array.isArray(fields)
     ? fields
@@ -1077,37 +1120,64 @@ function normalizeCustomFields(
       ? fields.custom_fields
       : [];
 
-  return rawFields.flatMap((field) => {
-    if (!isRecord(field) || field.hidden === true || field.internal_only === true) {
-      return [];
-    }
+  return rawFields
+    .flatMap((field) => {
+      if (
+        !isRecord(field) ||
+        field.hidden === true ||
+        field.internal_only === true
+      ) {
+        return [];
+      }
 
-    const fieldKey = optionLabel(field.field_key);
-    if (!fieldKey) {
-      return [];
-    }
+      const fieldKey = optionLabel(field.field_key);
+      if (!fieldKey) {
+        return [];
+      }
 
-    const fieldType = optionLabel(field.field_type).toLowerCase();
-    const label = optionLabel(field.label) || humanizeIdentifier(fieldKey);
-    if (shouldSkipField?.(fieldKey, label)) {
-      return [];
-    }
+      const fieldType = optionLabel(field.field_type).toLowerCase();
+      const label = optionLabel(field.label) || humanizeIdentifier(fieldKey);
+      const syncToColumn = optionLabel(field.sync_to_column) || undefined;
+      if (shouldSkipField?.(fieldKey, label, syncToColumn)) {
+        return [];
+      }
 
-    const helpText = optionLabel(field.help_text) || undefined;
-    const section = optionLabel(field.section) || undefined;
+      const helpText = optionLabel(field.help_text) || undefined;
+      const placeholder = optionLabel(field.placeholder) || undefined;
+      const section = optionLabel(field.section) || undefined;
+      const sectionOrder =
+        typeof field.section_order === "number" &&
+        Number.isFinite(field.section_order)
+          ? field.section_order
+          : undefined;
+      const fieldOrder =
+        typeof field.field_order === "number" &&
+        Number.isFinite(field.field_order)
+          ? field.field_order
+          : undefined;
 
-    return [
-      {
-        fieldKey,
-        fieldType,
-        helpText,
-        label,
-        options: normalizeOptions(field.options),
-        required: field.required === true,
-        section,
-      },
-    ];
-  });
+      return [
+        {
+          fieldKey,
+          fieldType,
+          fieldOrder,
+          helpText,
+          label,
+          options: normalizeOptions(field.options),
+          placeholder,
+          required: field.required === true,
+          section,
+          sectionOrder,
+        },
+      ];
+    })
+    .sort(
+      (left, right) =>
+        (left.sectionOrder ?? Number.MAX_SAFE_INTEGER) -
+          (right.sectionOrder ?? Number.MAX_SAFE_INTEGER) ||
+        (left.fieldOrder ?? Number.MAX_SAFE_INTEGER) -
+          (right.fieldOrder ?? Number.MAX_SAFE_INTEGER),
+    );
 }
 
 function formatCustomFieldName(field: NormalizedCustomField): string {
@@ -1116,9 +1186,12 @@ function formatCustomFieldName(field: NormalizedCustomField): string {
   return `${prefix}${field.label}${suffix}`;
 }
 
-function formatCustomFieldDescription(field: NormalizedCustomField): string | undefined {
+function formatCustomFieldDescription(
+  field: NormalizedCustomField,
+): string | undefined {
   const parts = [
     field.helpText,
+    field.placeholder ? `Example: ${field.placeholder}` : undefined,
     field.options.length
       ? `Options: ${field.options
           .slice(0, 8)
@@ -1198,7 +1271,7 @@ async function promptForCustomFieldValue(
   }
 
   return prompts.input({
-    message,
+    message: field.placeholder ? `${message} (${field.placeholder})` : message,
     default: "",
     required: field.required,
   });
@@ -1274,6 +1347,8 @@ async function promptForCustomFieldsPayload(
 async function promptForPersonPayload(
   prompts: PromptAdapter,
   loadCustomFields?: (type: PersonType) => Promise<unknown>,
+  loadContract?: (type: ContractType) => Promise<unknown>,
+  stderr?: Writable,
 ): Promise<Record<string, unknown>> {
   const type = await prompts.select({
     message: "Person type",
@@ -1298,12 +1373,57 @@ async function promptForPersonPayload(
     }
   }
 
-  const status = await prompts.select({
-    message: "Status",
-    choices: createSelectChoices(PERSON_STATUSES),
-    default: type === "adopter" ? "active" : "pending",
-  });
-  payload.status = status;
+  let isApplication = false;
+  if (type === "adopter" || type === "foster") {
+    isApplication = await prompts.confirm({
+      message: "Submit this person as an application for specific pets?",
+      default: false,
+    });
+  }
+
+  if (isApplication) {
+    const contract = await loadContract?.(type);
+    const content = isRecord(contract) ? optionLabel(contract.content) : "";
+    if (!content) {
+      throw new CliUsageError(
+        `Unable to load the ${type} contract before accepting its terms`,
+      );
+    }
+    stderr?.write(
+      `\n${chalk.bold(`${humanizeIdentifier(type)} contract`)}\n${content}\n\n`,
+    );
+
+    const petIds = splitCommaSeparated(
+      await prompts.input({
+        message: "PawPlacer pet IDs, comma-separated (1-5)",
+        required: true,
+      }),
+    );
+    if (petIds.length < 1 || petIds.length > 5) {
+      throw new CliUsageError("Applications require between 1 and 5 pet IDs");
+    }
+    if (new Set(petIds).size !== petIds.length) {
+      throw new CliUsageError("Application pet IDs must be unique");
+    }
+    const termsAccepted = await prompts.confirm({
+      message: `Applicant accepted the ${type} contract shown above?`,
+      default: false,
+    });
+    if (!termsAccepted) {
+      throw new CliUsageError(
+        "Contract terms must be accepted before submitting an application",
+      );
+    }
+
+    payload.status = "pending";
+    payload.application = { pet_ids: petIds, terms_accepted: true };
+  } else {
+    payload.status = await prompts.select({
+      message: "Status",
+      choices: createSelectChoices(PERSON_CREATE_STATUSES),
+      default: type === "adopter" ? "active" : "pending",
+    });
+  }
 
   if (type === "foster") {
     const capacity = await prompts.number({
@@ -1315,7 +1435,10 @@ async function promptForPersonPayload(
     }
   }
 
-  const customFieldData = await promptForCustomFieldsPayload(prompts, customFields);
+  const customFieldData = await promptForCustomFieldsPayload(
+    prompts,
+    customFields,
+  );
   if (Object.keys(customFieldData).length) {
     payload.custom_field_data = customFieldData;
   }
@@ -1405,7 +1528,10 @@ function addPayloadOptions(command: Command): Command {
     .option("--json <json>", "read JSON payload from an inline string")
     .option("--prompt", "build the payload interactively")
     .option("--stdin", "read JSON payload from stdin")
-    .option("--idempotency-key <key>", "stable idempotency key for safe retries")
+    .option(
+      "--idempotency-key <key>",
+      "stable idempotency key for safe retries",
+    )
     .option("--no-auto-idempotency-key", "disable automatic idempotency key")
     .option("--retry", "enable write retry when an idempotency key is present");
 }
@@ -1450,7 +1576,10 @@ export function createProgram(deps: ProgramDeps = {}): Command {
     .name("pawplacer")
     .description("Command-line interface for the PawPlacer API")
     .version(packageJson.version)
-    .option("--api-key <key>", "PawPlacer API key; defaults to PAWPLACER_API_KEY")
+    .option(
+      "--api-key <key>",
+      "PawPlacer API key; defaults to PAWPLACER_API_KEY",
+    )
     .option("--api-url <url>", "PawPlacer API URL")
     .option("--timeout <ms>", "request timeout in milliseconds")
     .option("--no-cache", "disable SDK in-memory GET cache")
@@ -1469,7 +1598,7 @@ export function createProgram(deps: ProgramDeps = {}): Command {
     .option("--force-refresh", "bypass cached value")
     .action(
       action(fullDeps, async (command, client) =>
-        client.pets.get(command.args[0]!, {
+        client.pets.get(requireCommandArgument(command, 0, "pet ID"), {
           forceRefresh: command.opts<ForceRefreshOption>().forceRefresh,
         }),
       ),
@@ -1480,7 +1609,7 @@ export function createProgram(deps: ProgramDeps = {}): Command {
     .argument("<query>", "search query")
     .action(
       action(fullDeps, async (command, client) =>
-        client.pets.search(command.args[0]!),
+        client.pets.search(requireCommandArgument(command, 0, "search query")),
       ),
     );
   pets
@@ -1489,7 +1618,9 @@ export function createProgram(deps: ProgramDeps = {}): Command {
     .argument("<status>", "pet status")
     .action(
       action(fullDeps, async (command, client) =>
-        client.pets.getByStatus(command.args[0]!),
+        client.pets.getByStatus(
+          requireCommandArgument(command, 0, "pet status"),
+        ),
       ),
     );
   addPayloadOptions(pets.command("create").description("Create a pet")).action(
@@ -1507,12 +1638,15 @@ export function createProgram(deps: ProgramDeps = {}): Command {
     pets
       .command("update")
       .description("Update a pet")
-      .argument("<id-or-custom-id>", "PawPlacer pet UUID or assigned custom_id"),
+      .argument(
+        "<id-or-custom-id>",
+        "PawPlacer pet UUID or assigned custom_id",
+      ),
   ).action(
     action(fullDeps, async (command, client) => {
       const options = command.opts<CreateCommandOptions>();
       return client.pets.update(
-        command.args[0]!,
+        requireCommandArgument(command, 0, "pet ID or custom ID"),
         await readPayload(options, fullDeps, (prompts) =>
           promptForPetUpdatePayload(prompts, () =>
             client.pets.getCustomFields(),
@@ -1525,14 +1659,20 @@ export function createProgram(deps: ProgramDeps = {}): Command {
   pets
     .command("custom-fields")
     .description("Fetch pet custom field definitions")
-    .action(action(fullDeps, async (_command, client) => client.pets.getCustomFields()));
+    .action(
+      action(fullDeps, async (_command, client) =>
+        client.pets.getCustomFields(),
+      ),
+    );
 
   const people = program.command("people").description("Work with people");
   addListOptions(people.command("list").description("List people"), false)
     .requiredOption("--type <type>", "adopter, foster, surrender, or volunteer")
     .action(
       action(fullDeps, async (command, client) =>
-        client.people.list(buildPeopleListParams(command.opts<PeopleListOptions>())),
+        client.people.list(
+          buildPeopleListParams(command.opts<PeopleListOptions>()),
+        ),
       ),
     );
   people
@@ -1544,18 +1684,25 @@ export function createProgram(deps: ProgramDeps = {}): Command {
     .action(
       action(fullDeps, async (command, client) => {
         const options = command.opts<TypeOption & ForceRefreshOption>();
-        return client.people.get(command.args[0]!, requirePersonType(options.type), {
-          forceRefresh: options.forceRefresh,
-        });
+        return client.people.get(
+          requireCommandArgument(command, 0, "person ID"),
+          requirePersonType(options.type),
+          { forceRefresh: options.forceRefresh },
+        );
       }),
     );
-  addPayloadOptions(people.command("create").description("Create a person")).action(
+  addPayloadOptions(
+    people.command("create").description("Create a person"),
+  ).action(
     action(fullDeps, async (command, client) => {
       const options = command.opts<CreateCommandOptions>();
       return client.people.create(
         await readPayload(options, fullDeps, (prompts) =>
-          promptForPersonPayload(prompts, (type) =>
-            client.people.getCustomFields(type),
+          promptForPersonPayload(
+            prompts,
+            (type) => client.people.getCustomFields(type),
+            (type) => client.contracts.get(type),
+            fullDeps.stderr,
           ),
         ),
         buildCreateOptions(options),
@@ -1568,14 +1715,18 @@ export function createProgram(deps: ProgramDeps = {}): Command {
     .requiredOption("--type <type>", "adopter, foster, surrender, or volunteer")
     .action(
       action(fullDeps, async (command, client) =>
-        client.people.getCustomFields(requirePersonType(command.opts<TypeOption>().type)),
+        client.people.getCustomFields(
+          requirePersonType(command.opts<TypeOption>().type),
+        ),
       ),
     );
 
   program
     .command("adoption-fees")
     .description("Fetch adoption fee rules")
-    .action(action(fullDeps, async (_command, client) => client.adoptionFees.get()));
+    .action(
+      action(fullDeps, async (_command, client) => client.adoptionFees.get()),
+    );
 
   program
     .command("contracts")
@@ -1583,7 +1734,9 @@ export function createProgram(deps: ProgramDeps = {}): Command {
     .requiredOption("--type <type>", "adopter, foster, surrender, or volunteer")
     .action(
       action(fullDeps, async (command, client) =>
-        client.contracts.get(requireContractType(command.opts<TypeOption>().type)),
+        client.contracts.get(
+          requireContractType(command.opts<TypeOption>().type),
+        ),
       ),
     );
 
@@ -1602,9 +1755,16 @@ export function createProgram(deps: ProgramDeps = {}): Command {
           choices: [
             { name: "List available pets", value: "pets:list" },
             { name: "Search pets", value: "pets:search" },
+            { name: "List pets by status", value: "pets:status" },
             { name: "Get a pet by ID", value: "pets:get" },
+            { name: "View pet custom fields", value: "pets:custom-fields" },
             { name: "List people", value: "people:list" },
+            { name: "Search people", value: "people:search" },
             { name: "Get a person by ID", value: "people:get" },
+            {
+              name: "View people custom fields",
+              value: "people:custom-fields",
+            },
             { name: "View adoption fees", value: "adoption-fees" },
             { name: "View contract terms", value: "contracts" },
           ],
@@ -1629,6 +1789,14 @@ export function createProgram(deps: ProgramDeps = {}): Command {
             }),
           );
         }
+        if (task === "pets:status") {
+          return client.pets.getByStatus(
+            await fullDeps.prompts.select({
+              message: "Pet status",
+              choices: createSelectChoices(PET_STATUSES),
+            }),
+          );
+        }
         if (task === "pets:get") {
           return client.pets.get(
             await fullDeps.prompts.input({
@@ -1637,12 +1805,26 @@ export function createProgram(deps: ProgramDeps = {}): Command {
             }),
           );
         }
+        if (task === "pets:custom-fields") {
+          return client.pets.getCustomFields();
+        }
         if (task === "people:list") {
           const type = await fullDeps.prompts.select({
             message: "Person type",
             choices: PERSON_TYPES.map((value) => ({ name: value, value })),
           });
           return client.people.list({ type, limit: 20 });
+        }
+        if (task === "people:search") {
+          const type = await fullDeps.prompts.select({
+            message: "Person type",
+            choices: PERSON_TYPES.map((value) => ({ name: value, value })),
+          });
+          const query = await fullDeps.prompts.input({
+            message: "Search query",
+            required: true,
+          });
+          return client.people.list({ type, search: query, limit: 20 });
         }
         if (task === "people:get") {
           const type = await fullDeps.prompts.select({
@@ -1654,6 +1836,13 @@ export function createProgram(deps: ProgramDeps = {}): Command {
             required: true,
           });
           return client.people.get(id, type);
+        }
+        if (task === "people:custom-fields") {
+          const type = await fullDeps.prompts.select({
+            message: "Person type",
+            choices: PERSON_TYPES.map((value) => ({ name: value, value })),
+          });
+          return client.people.getCustomFields(type);
         }
         if (task === "adoption-fees") {
           return client.adoptionFees.get();

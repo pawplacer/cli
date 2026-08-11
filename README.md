@@ -15,9 +15,9 @@ Requires Node.js 20 or newer.
 npm install -g pawplacer-cli
 ```
 
-On launch, the CLI checks npm for a newer version at most once every 48 hours.
-If an update is available, it prints an update command to stderr. Set
-`PAWPLACER_NO_UPDATE_CHECK=1` to disable this check.
+On launch, the CLI checks npm for newer CLI and installed SDK versions at most
+once every 48 hours. If either is out of date, it prints an update command to
+stderr. Set `PAWPLACER_NO_UPDATE_CHECK=1` to disable this check.
 
 For local development in this repo:
 
@@ -49,6 +49,7 @@ pawplacer pets list --status available --species dog --limit 20
 pawplacer pets get pet-uuid
 pawplacer pets update DOG-2026-001 --json '{"description":"Updated bio"}'
 pawplacer people list --type adopter --status active
+pawplacer people list --type adopter --search "Jane"
 pawplacer adoption-fees
 pawplacer contracts --type adopter
 ```
@@ -100,6 +101,16 @@ Create it with:
 ```bash
 pawplacer people create --json '{"type":"adopter","name":"Jane Smith"}'
 ```
+
+SDK 1.6 application metadata is also supported. The contract must be shown to
+and accepted by the applicant before submission:
+
+```bash
+pawplacer people create --json '{"type":"adopter","name":"Jane Smith","email":"jane@example.com","status":"pending","application":{"pet_ids":["pet-uuid"],"terms_accepted":true}}'
+```
+
+The SDK generates an idempotency key automatically. If you pass one explicitly
+for an application, it must be a UUID.
 
 Example output from `pawplacer pets list --compact`:
 
@@ -249,13 +260,18 @@ pawplacer pets update DOG-2026-001 --prompt
 pawplacer people create --prompt
 ```
 
-The guide is read-only. The create prompts ask for the required fields, select
-status from the API-supported options, then submit the payload through the SDK.
+The guide is read-only and includes pet and people search, pet status filtering,
+record lookup, custom-field definitions, adoption fees, and contracts. The
+create prompts ask for the required fields, select status from the API-supported
+create options, then submit the payload through the SDK. Adopter and foster
+application prompts render the applicable contract before collecting pet IDs
+and terms acceptance.
 `pets create --prompt` also lets you add optional pet details such as color,
 spay/neuter status, compatibility, temperaments, medical conditions, image URLs,
 dates, and weight. For `pets create --prompt` and `people create --prompt`, the
-CLI fetches custom field definitions, shows field labels and configured option
-labels, and lets you choose which optional custom fields to include.
+CLI fetches custom field definitions, respects their configured section and
+field order, shows field labels, placeholders, and option labels, and lets you
+choose which optional custom fields to include.
 
 ## Create From JSON
 
@@ -331,6 +347,8 @@ Valid contract types: `adopter`, `foster`, `surrender`, `volunteer`.
 ## Development
 
 ```bash
+npm run lint
+npm run format:check
 npm run typecheck
 npm test
 npm run build
@@ -338,6 +356,7 @@ npm run check
 ```
 
 During development, the CLI uses the published `pawplacer-sdk` package.
+This release requires `pawplacer-sdk@^1.6.0`.
 
 ## Troubleshooting
 
