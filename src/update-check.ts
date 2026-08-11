@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import process from "node:process";
 
 import chalk from "chalk";
@@ -11,12 +12,15 @@ type Writable = Pick<NodeJS.WriteStream, "write">;
 
 interface UpdateCache {
   checkedAt?: number;
-  latestVersion?: string;
+  latestCliVersion?: string;
+  latestSdkVersion?: string;
+  schemaVersion?: number;
 }
 
 export interface UpdateCheckDeps {
   cacheDir?: string;
   cacheTtlMs?: number;
+  currentSdkVersion?: string;
   env?: NodeJS.ProcessEnv;
   fetch?: typeof fetch;
   mkdir?: typeof mkdir;
@@ -27,9 +31,15 @@ export interface UpdateCheckDeps {
   writeFile?: typeof writeFile;
 }
 
-const NPM_LATEST_URL = "https://registry.npmjs.org/pawplacer-cli/latest";
+const CLI_PACKAGE_NAME = "pawplacer-cli";
+const SDK_PACKAGE_NAME = "pawplacer-sdk";
+const NPM_LATEST_URLS = {
+  cli: `https://registry.npmjs.org/${CLI_PACKAGE_NAME}/latest`,
+  sdk: `https://registry.npmjs.org/${SDK_PACKAGE_NAME}/latest`,
+};
 const DEFAULT_CACHE_TTL_MS = 48 * 60 * 60 * 1000;
 const DEFAULT_TIMEOUT_MS = 750;
+const UPDATE_CACHE_SCHEMA_VERSION = 2;
 
 function parseVersion(version: string): number[] | undefined {
   const match = version.match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
@@ -47,7 +57,7 @@ function compareVersions(left: string, right: string): number {
   }
 
   for (let index = 0; index < parsedLeft.length; index += 1) {
-    const diff = parsedLeft[index]! - parsedRight[index]!;
+    const diff = (parsedLeft[index] ?? 0) - (parsedRight[index] ?? 0);
     if (diff !== 0) {
       return diff;
     }
@@ -77,12 +87,22 @@ function parseCache(contents: string): UpdateCache | undefined {
     }
 
     const cache = value as Record<string, unknown>;
+    const legacyLatestVersion =
+      typeof cache.latestVersion === "string" ? cache.latestVersion : undefined;
     return {
       checkedAt:
         typeof cache.checkedAt === "number" ? cache.checkedAt : undefined,
-      latestVersion:
-        typeof cache.latestVersion === "string"
-          ? cache.latestVersion
+      latestCliVersion:
+        typeof cache.latestCliVersion === "string"
+          ? cache.latestCliVersion
+          : legacyLatestVersion,
+      latestSdkVersion:
+        typeof cache.latestSdkVersion === "string"
+          ? cache.latestSdkVersion
+          : undefined,
+      schemaVersion:
+        typeof cache.schemaVersion === "number"
+          ? cache.schemaVersion
           : undefined,
     };
   } catch {
@@ -103,14 +123,18 @@ async function readCache(
 
 async function writeCache(
   cacheDir: string,
-  latestVersion: string,
+  latestVersions: Pick<UpdateCache, "latestCliVersion" | "latestSdkVersion">,
   deps: Required<Pick<UpdateCheckDeps, "mkdir" | "now" | "writeFile">>,
 ): Promise<void> {
   try {
     await deps.mkdir(cacheDir, { recursive: true });
     await deps.writeFile(
       join(cacheDir, "update-check.json"),
-      `${JSON.stringify({ checkedAt: deps.now(), latestVersion })}\n`,
+      `${JSON.stringify({
+        schemaVersion: UPDATE_CACHE_SCHEMA_VERSION,
+        checkedAt: deps.now(),
+        ...latestVersions,
+      })}\n`,
       "utf8",
     );
   } catch {
@@ -120,6 +144,7 @@ async function writeCache(
 
 async function fetchLatestVersion(
   fetchImpl: typeof fetch,
+  url: string,
   timeoutMs: number,
 ): Promise<string | undefined> {
   const controller = new AbortController();
@@ -127,7 +152,7 @@ async function fetchLatestVersion(
   timeout.unref?.();
 
   try {
-    const response = await fetchImpl(NPM_LATEST_URL, {
+    const response = await fetchImpl(url, {
       headers: { accept: "application/vnd.npm.install-v1+json" },
       signal: controller.signal,
     });
@@ -147,17 +172,59 @@ async function fetchLatestVersion(
   }
 }
 
-function formatUpdateNotice(currentVersion: string, latestVersion: string): string {
+async function detectInstalledSdkVersion(): Promise<string | undefined> {
+  let entryPath: string;
+  try {
+    entryPath = createRequire(import.meta.url).resolve(SDK_PACKAGE_NAME);
+  } catch {
+    return undefined;
+  }
+
+  let directory = dirname(entryPath);
+  while (true) {
+    try {
+      const contents = await readFile(join(directory, "package.json"), "utf8");
+      const manifest = JSON.parse(contents) as unknown;
+      if (
+        manifest &&
+        typeof manifest === "object" &&
+        !Array.isArray(manifest) &&
+        (manifest as Record<string, unknown>).name === SDK_PACKAGE_NAME
+      ) {
+        const version = (manifest as Record<string, unknown>).version;
+        return typeof version === "string" ? version : undefined;
+      }
+    } catch {
+      // Keep walking until the dependency package root is found.
+    }
+
+    const parent = dirname(directory);
+    if (parent === directory) {
+      return undefined;
+    }
+    directory = parent;
+  }
+}
+
+interface PackageUpdate {
+  currentVersion: string;
+  latestVersion: string;
+  packageName: string;
+}
+
+function formatUpdateNotice(updates: PackageUpdate[]): string {
   const command = "npm install -g pawplacer-cli@latest";
   const rows = [
     {
       raw: "↻ Update available",
       styled: `${chalk.yellow("↻")} ${chalk.bold("Update available")}`,
     },
-    {
-      raw: `pawplacer-cli ${currentVersion} -> ${latestVersion}`,
-      styled: chalk.gray(`pawplacer-cli ${currentVersion} -> ${latestVersion}`),
-    },
+    ...updates.map(({ currentVersion, latestVersion, packageName }) => ({
+      raw: `${packageName} ${currentVersion} -> ${latestVersion}`,
+      styled: chalk.gray(
+        `${packageName} ${currentVersion} -> ${latestVersion}`,
+      ),
+    })),
     {
       raw: `Run ${command} and restart pawplacer.`,
       styled: `Run ${chalk.cyan(command)} and restart pawplacer.`,
@@ -178,7 +245,9 @@ function formatUpdateNotice(currentVersion: string, latestVersion: string): stri
   ].join("\n");
 }
 
-export async function checkForUpdates(deps: UpdateCheckDeps = {}): Promise<void> {
+export async function checkForUpdates(
+  deps: UpdateCheckDeps = {},
+): Promise<void> {
   const env = deps.env ?? process.env;
   if (updateCheckDisabled(env)) {
     return;
@@ -199,32 +268,69 @@ export async function checkForUpdates(deps: UpdateCheckDeps = {}): Promise<void>
     ? await readCache(cachePath, readFileImpl)
     : undefined;
 
-  let latestVersion: string | undefined;
+  let latestCliVersion: string | undefined;
+  let latestSdkVersion: string | undefined;
   if (
-    cached?.latestVersion &&
+    cached?.schemaVersion === UPDATE_CACHE_SCHEMA_VERSION &&
+    (cached?.latestCliVersion || cached?.latestSdkVersion) &&
     typeof cached.checkedAt === "number" &&
     now() - cached.checkedAt < cacheTtlMs
   ) {
-    latestVersion = cached.latestVersion;
+    latestCliVersion = cached.latestCliVersion;
+    latestSdkVersion = cached.latestSdkVersion;
   } else {
-    try {
-      latestVersion =
-        (await fetchLatestVersion(fetchImpl, deps.timeoutMs ?? DEFAULT_TIMEOUT_MS)) ??
-        cached?.latestVersion;
-    } catch {
-      latestVersion = cached?.latestVersion;
-    }
+    const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const [fetchedCliVersion, fetchedSdkVersion] = await Promise.all([
+      fetchLatestVersion(fetchImpl, NPM_LATEST_URLS.cli, timeoutMs).catch(
+        () => undefined,
+      ),
+      fetchLatestVersion(fetchImpl, NPM_LATEST_URLS.sdk, timeoutMs).catch(
+        () => undefined,
+      ),
+    ]);
+    latestCliVersion = fetchedCliVersion ?? cached?.latestCliVersion;
+    latestSdkVersion = fetchedSdkVersion ?? cached?.latestSdkVersion;
 
-    if (latestVersion && cacheDir) {
-      await writeCache(cacheDir, latestVersion, {
-        mkdir: deps.mkdir ?? mkdir,
-        now,
-        writeFile: deps.writeFile ?? writeFile,
-      });
+    if ((latestCliVersion || latestSdkVersion) && cacheDir) {
+      await writeCache(
+        cacheDir,
+        { latestCliVersion, latestSdkVersion },
+        {
+          mkdir: deps.mkdir ?? mkdir,
+          now,
+          writeFile: deps.writeFile ?? writeFile,
+        },
+      );
     }
   }
 
-  if (latestVersion && compareVersions(latestVersion, packageJson.version) > 0) {
-    stderr.write(`${formatUpdateNotice(packageJson.version, latestVersion)}\n`);
+  const updates: PackageUpdate[] = [];
+  if (
+    latestCliVersion &&
+    compareVersions(latestCliVersion, packageJson.version) > 0
+  ) {
+    updates.push({
+      currentVersion: packageJson.version,
+      latestVersion: latestCliVersion,
+      packageName: CLI_PACKAGE_NAME,
+    });
+  }
+
+  const currentSdkVersion =
+    deps.currentSdkVersion ?? (await detectInstalledSdkVersion());
+  if (
+    currentSdkVersion &&
+    latestSdkVersion &&
+    compareVersions(latestSdkVersion, currentSdkVersion) > 0
+  ) {
+    updates.push({
+      currentVersion: currentSdkVersion,
+      latestVersion: latestSdkVersion,
+      packageName: SDK_PACKAGE_NAME,
+    });
+  }
+
+  if (updates.length) {
+    stderr.write(`${formatUpdateNotice(updates)}\n`);
   }
 }

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-11
+
+### Added
+
+- Interactive adopter and foster application submission with contract rendering, PawPlacer pet IDs, and explicit terms acceptance from `pawplacer-sdk` 1.6.
+- People search, pet status filtering, and pet/people custom-field catalogs in the read-only `guide`.
+- Update notices when either the CLI or its installed `pawplacer-sdk` version is behind npm.
+
+### Changed
+
+- Updated the CLI dependency to `pawplacer-sdk@^1.6.0`.
+- Custom-field prompts now respect SDK-provided section/field ordering, placeholders, and `sync_to_column` metadata.
+- Person creation prompts now offer only API-supported create-time statuses.
+- CI and release checks now enforce Biome linting and formatting.
+- CI now verifies Node.js 20, 22, and 24 compatibility.
+
 ## [1.1.0] - 2026-06-11
 
 ### Added
