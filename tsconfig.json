@@ -6,7 +6,7 @@
     "forceConsistentCasingInFileNames": true,
     "ignoreDeprecations": "6.0",
     "isolatedModules": true,
-    "lib": ["es2020", "dom"],
+    "lib": ["es2022", "dom"],
     "module": "esnext",
     "moduleResolution": "bundler",
     "outDir": "./dist",
@@ -14,7 +14,7 @@
     "rootDir": ".",
     "skipLibCheck": true,
     "strict": true,
-    "target": "es2020",
+    "target": "es2022",
     "types": ["node"]
   },
   "include": ["src/**/*", "__tests__/**/*"],

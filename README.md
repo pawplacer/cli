@@ -1,124 +1,162 @@
 # PawPlacer CLI
 
-Command-line interface for the PawPlacer API. Built on `pawplacer-sdk`.
+Work with your PawPlacer pets, people, adoption fees, and contracts from the
+terminal. Built on [`pawplacer-sdk`](https://github.com/pawplacer/sdk).
 
-## What Is This?
-
-PawPlacer CLI lets shelters and rescues list, create, and manage pets, people,
-adoption fees, and contracts from the terminal.
+Upgrading from 1.x? See [Upgrading to 2.0](#upgrading-to-20).
 
 ## Install
 
-Requires Node.js 20 or newer.
+Requires Node.js 22.12 or newer.
 
 ```bash
 npm install -g pawplacer-cli
 ```
 
-On launch, the CLI checks npm for newer CLI and installed SDK versions at most
-once every 48 hours. If either is out of date, it prints an update command to
-stderr. Set `PAWPLACER_NO_UPDATE_CHECK=1` to disable this check.
-
-For local development in this repo:
-
-```bash
-npm install
-npm run build
-npm link
-```
-
 ## Auth
 
-Use a server-side API key from **Settings > SDK & API**.
+Create an API key in PawPlacer under **Settings > SDK/API**, then:
 
 ```bash
-export PAWPLACER_API_KEY="pp_..."
+export PAWPLACER_API_KEY="ppk_live_..."
+pawplacer doctor
 ```
 
-Do not commit API keys. Prefer environment variables or your shell's secret
-manager for local use.
+`doctor` checks the key and connection, and shows the API version, your rate
+limit, and whether the workspace still has sample data. You can also pass
+`--api-key`, and in a terminal with no key set the CLI asks for one.
 
-You can also pass `--api-key`. If you run the CLI in an interactive terminal
-without a key, it prompts for one.
+Read-only keys can run every read command. Create and update commands need a
+**Write + read** key. Don't commit keys; keep them in your shell's secret
+manager or your CI's secrets.
 
-## Quick Start
+## Quick start
 
 ```bash
 pawplacer guide
-pawplacer pets list --status available --species dog --limit 20
-pawplacer pets get pet-uuid
-pawplacer pets update DOG-2026-001 --json '{"description":"Updated bio"}'
-pawplacer people list --type adopter --status active
+pawplacer pets list --status available --species dog
+pawplacer pets get <pet-uuid>
+pawplacer pets update DOG-2026-001 --data '{"description":"Updated bio"}'
 pawplacer people list --type adopter --search "Jane"
 pawplacer adoption-fees
 pawplacer contracts --type adopter
 ```
 
-All command output is JSON so it works well with tools like `jq`.
+## Output
+
+In a terminal, lists print as tables and single records as labeled fields.
+When output is piped, or with `--json`, every command prints JSON, so scripts
+and `jq` keep working:
 
 ```bash
-pawplacer pets list --status available --compact | jq ".total"
+pawplacer pets list --status available --json | jq '.total'
+pawplacer pets list --all --compact > pets.json
 ```
+
+List JSON matches the SDK: `{ "data": [...], "total", "limit", "offset", "hasMore" }`.
+With `--all`, the CLI fetches every page and prints `{ "data": [...], "total" }`.
+
+Notices, such as the sample-data reminder and update notices, go to stderr, so
+they never mix into JSON on stdout. `--quiet` hides them.
+
+### Sample data
+
+New workspaces start with sample data. While it's there, API responses include
+the sample pets and people (sample pets have `"is_sample": true`), and the CLI
+prints a reminder on stderr. Keep or clear the sample data in **Settings >
+Danger Zone** before you sync anything to a live website.
+
+## Commands
+
+### Pets
+
+```bash
+pawplacer pets list [--status <status>] [--species <species>] [--search <text>]
+                    [--since <date>] [--limit <1-100>] [--offset <n>] [--all]
+pawplacer pets get <pet-uuid>
+pawplacer pets create [--data <json> | --file <path> | --prompt]
+pawplacer pets update <pet-uuid-or-custom-id> [--data <json> | --file <path> | --prompt]
+pawplacer pets custom-fields
+```
+
+Species: `dog`, `cat`, `rabbit`, `horse`, `small_furry`, `bird`, `barnyard`,
+`reptile`, `scales_fins_other`, `invertebrate`. `--status` takes any status
+name or label your account uses, like `available` or `"Ready for Adoption"`.
+
+### People
+
+```bash
+pawplacer people list --type <type> [--status <status>] [--search <text>]
+                      [--since <date>] [--limit <1-100>] [--offset <n>] [--all]
+pawplacer people get <person-uuid> --type <type>
+pawplacer people create [--data <json> | --file <path> | --prompt]
+pawplacer people custom-fields --type <type>
+```
+
+Types: `adopter`, `foster`, `surrender`, `volunteer`. Statuses: `pending`,
+`active`, `training`, `inactive`, `denied`, `suspended`, `blocked`.
+
+### Fees, contracts, and setup
+
+```bash
+pawplacer adoption-fees
+pawplacer contracts --type <adopter|foster|surrender|volunteer>
+pawplacer doctor
+pawplacer guide
+```
+
+## Creating and updating
+
+Give a payload one of three ways:
+
+```bash
+pawplacer pets create --data '{"name":"Maple","species":"dog","age_category":"adult","sex":"female","size":"medium","status":"available"}'
+pawplacer pets create --file pet.json
+cat pet.json | pawplacer pets create
+```
+
+With no payload flag, the CLI prompts in a terminal and reads JSON from stdin
+when piped. `--file -` also reads stdin.
+
+`pets update` sends only the fields you give it. Use `""` or `[]` to clear a
+field:
+
+```bash
+pawplacer pets update DOG-2026-001 --data '{"description":"","special_needs":[]}'
+```
+
+### Prompts
+
+`pets create`, `pets update`, and `people create` can build the payload from
+prompts. Pet prompts cover every species and field, and accept any status your
+account uses. They also include your custom fields, in the order and sections
+you set up in PawPlacer. In `pets update`, leaving a text or list answer blank
+clears that field.
+
+`people create` asks volunteers for skills, interests, preferred roles, and
+languages. For adopter and foster applications, it shows the contract, then
+asks for the pet IDs and whether the applicant accepted the terms.
+
+### Idempotency
+
+Every create and update sends an idempotency key, and the SDK retries the write
+on timeouts, 429s, and 5xx responses. Pass your own key when a sync job may run
+twice, so the second run returns the first result instead of writing again:
+
+```bash
+pawplacer pets create --file pet.json --idempotency-key "pet:DOG-2026-001"
+```
+
+Use a new key for each different change; reusing a key with a different payload
+returns a conflict. Application keys must be UUIDs. `--no-idempotency-key`
+sends no key and turns off write retries.
 
 ## Examples
 
-The `custom_field_data` keys below are examples. Use
-`pawplacer pets custom-fields` or
-`pawplacer people custom-fields --type adopter` to inspect your configured
-field keys.
+Use `pawplacer pets custom-fields` and `pawplacer people custom-fields --type <type>`
+to see your own `custom_field_data` keys. The keys below are examples.
 
-Minimal `pet.json`:
-
-```json
-{
-  "name": "Maple",
-  "species": "dog",
-  "age_category": "adult",
-  "sex": "female",
-  "size": "medium",
-  "status": "available",
-  "health": "good"
-}
-```
-
-Create it with:
-
-```bash
-pawplacer pets create --file pet.json
-```
-
-Minimal adopter JSON:
-
-```json
-{
-  "type": "adopter",
-  "name": "Jane Smith"
-}
-```
-
-Create it with:
-
-```bash
-pawplacer people create --json '{"type":"adopter","name":"Jane Smith"}'
-```
-
-SDK 1.6 application metadata is also supported. The contract must be shown to
-and accepted by the applicant before submission:
-
-```bash
-pawplacer people create --json '{"type":"adopter","name":"Jane Smith","email":"jane@example.com","status":"pending","application":{"pet_ids":["pet-uuid"],"terms_accepted":true}}'
-```
-
-The SDK generates an idempotency key automatically. If you pass one explicitly
-for an application, it must be a UUID.
-
-Example output from `pawplacer pets list --compact`:
-
-```json
-{"data":[{"id":"pet_123","name":"Maple","species":"dog","status":"available"}],"total":1,"limit":20,"offset":0}
-```
-
-Larger `pet.json` with common optional fields:
+Pet with common optional fields (`pet.json`):
 
 ```json
 {
@@ -135,34 +173,19 @@ Larger `pet.json` with common optional fields:
   "description": "Playful, social dog who does well in an active home.",
   "spayed": true,
   "adoption_fee": 250,
-  "microchip_id": "985112009876543",
-  "good_with": ["families", "kids", "dogs"],
+  "good_with": ["families", "kids", "dogs", "houseTrained"],
   "bad_with": ["cats"],
   "temperaments": ["playful", "social", "energetic"],
   "image_urls": ["https://example.com/max.jpg"],
   "custom_id": "DOG-2026-001",
   "intake_date": "2026-05-15",
   "show_public": true,
-  "special_needs": ["Daily joint supplement"],
   "weight": "48 lb",
-  "custom_field_data": {
-    "kennel": "A12",
-    "preferred_food": "Chicken kibble"
-  }
+  "custom_field_data": { "kennel": "A12" }
 }
 ```
 
-```bash
-pawplacer pets create --file pet.json --idempotency-key "pet:DOG-2026-001"
-```
-
-Update an existing pet by PawPlacer UUID or assigned `custom_id` with a partial payload:
-
-```bash
-pawplacer pets update DOG-2026-001 --json '{"description":"Updated bio","status":"available"}' --idempotency-key "pet:DOG-2026-001:update"
-```
-
-Larger foster JSON:
+Foster (`foster.json`):
 
 ```json
 {
@@ -170,56 +193,40 @@ Larger foster JSON:
   "name": "Bob Foster",
   "email": "bob@example.com",
   "phone": "555-0200",
-  "address": "456 Oak Ave, Austin, TX",
   "status": "active",
-  "status_change_notes": "Approved after home check.",
-  "capacity": 2,
-  "custom_field_data": {
-    "dog_experience": "yes",
-    "has_yard": true,
-    "preferred_size": "medium"
-  }
+  "capacity": 2
 }
 ```
 
-```bash
-pawplacer people create --file foster.json
-```
-
-Larger volunteer JSON:
+Volunteer (`volunteer.json`):
 
 ```json
 {
   "type": "volunteer",
   "name": "Val Volunteer",
   "email": "val@example.com",
-  "phone": "555-0400",
-  "status": "active",
-  "custom_field_data": {
-    "preferred_shift": "Saturday",
-    "interests": ["dog walking", "events"],
-    "orientation_complete": true
-  }
+  "status": "training",
+  "skills": ["Dog walking", "Photography"],
+  "preferred_roles": ["Events"],
+  "languages": ["Spanish"]
 }
 ```
 
+Adopter application. Show the applicant the contract from
+`pawplacer contracts --type adopter` first:
+
 ```bash
-pawplacer people create --file volunteer.json
+pawplacer people create --data '{"type":"adopter","name":"Jane Smith","email":"jane@example.com","status":"pending","application":{"pet_ids":["<pet-uuid>"],"terms_accepted":true}}'
 ```
 
-Surrender intake with a new pet to create and link:
+Surrender with a new pet to create and link (`surrender.json`):
 
 ```json
 {
   "type": "surrender",
   "name": "Sam Surrender",
   "email": "sam@example.com",
-  "phone": "555-0300",
   "status": "pending",
-  "custom_field_data": {
-    "requested_intake_at": "2026-06-15",
-    "reason_for_surrender": "Moving"
-  },
   "pets": [
     {
       "create": {
@@ -228,18 +235,10 @@ Surrender intake with a new pet to create and link:
         "age_category": "adult",
         "sex": "male",
         "size": "large",
-        "status": "intake",
-        "health": "unknown",
-        "breed": ["Lab Mix"],
-        "color": ["Black"],
-        "reason_for_surrender": "Moving"
+        "status": "intake"
       },
       "reason": "Moving",
-      "urgency": "high",
-      "notes": "Owner can foster until intake date.",
-      "custom_data": {
-        "has_vet_records": true
-      }
+      "urgency": "high"
     }
   ]
 }
@@ -249,119 +248,60 @@ Surrender intake with a new pet to create and link:
 pawplacer people create --file surrender.json --idempotency-key "surrender:sam-2026-06-15"
 ```
 
-## Interactive Commands
+## Global options
 
-The CLI uses prompts for common beginner workflows:
-
-```bash
-pawplacer guide
-pawplacer pets create --prompt
-pawplacer pets update DOG-2026-001 --prompt
-pawplacer people create --prompt
+```
+--api-key <key>   API key (default: PAWPLACER_API_KEY)
+--api-url <url>   API URL (default: PAWPLACER_API_URL or https://pawplacer.com)
+--timeout <ms>    per-request timeout
+--json            print JSON (the default when output is piped)
+--compact         print compact JSON
+--quiet           hide notices on stderr
+--debug           log each request to stderr and show stack traces
 ```
 
-The guide is read-only and includes pet and people search, pet status filtering,
-record lookup, custom-field definitions, adoption fees, and contracts. The
-create prompts ask for the required fields, select status from the API-supported
-create options, then submit the payload through the SDK. Adopter and foster
-application prompts render the applicable contract before collecting pet IDs
-and terms acceptance.
-`pets create --prompt` also lets you add optional pet details such as color,
-spay/neuter status, compatibility, temperaments, medical conditions, image URLs,
-dates, and weight. For `pets create --prompt` and `people create --prompt`, the
-CLI fetches custom field definitions, respects their configured section and
-field order, shows field labels, placeholders, and option labels, and lets you
-choose which optional custom fields to include.
+## Exit codes
 
-## Create From JSON
+| Code | Meaning |
+| ---- | ------- |
+| 0 | Success |
+| 1 | The API returned an error, or the CLI couldn't reach it |
+| 2 | Usage error: a bad flag or value, a missing key, or a missing payload |
+| 130 | You cancelled a prompt |
 
-For repeatable scripts, prefer files or stdin:
+API errors print the status, code, message, any field details, a hint when
+there is one, and the request ID to include in support requests.
 
-```bash
-pawplacer pets create --file pet.json
-pawplacer pets update DOG-2026-001 --file pet-update.json
-pawplacer people create --json '{"type":"adopter","name":"Jane Smith"}'
-cat pet.json | pawplacer pets create --stdin
-```
+## Update notices
 
-Create and update commands send an idempotency key by default. To use a stable key:
+Once a day, the CLI checks npm for a newer version while your command runs,
+and prints a notice on stderr when there is one. It skips the check in CI, when
+stderr isn't a terminal, with `--quiet`, or with `PAWPLACER_NO_UPDATE_CHECK=1`.
 
-```bash
-pawplacer pets create --file pet.json --idempotency-key "pet:external-123"
-pawplacer pets update DOG-2026-001 --file pet-update.json --idempotency-key "pet:DOG-2026-001:update"
-```
+## Upgrading to 2.0
 
-Disable automatic idempotency only when you understand the retry tradeoff:
+| 1.x | 2.0 |
+| --- | --- |
+| `pets search <query>` | `pets list --search <query>` |
+| `pets status <status>` | `pets list --status <status>` |
+| `--json '<payload>'` | `--data '<payload>'` (`--json` now means JSON output) |
+| `--stdin` | pipe the JSON in, or `--file -` |
+| `--updated-since <iso>` | `--since <date>` |
+| `--no-auto-idempotency-key` | `--no-idempotency-key` |
+| `--retry` | removed; keyed writes retry automatically |
+| `--no-cache`, `--force-refresh` | removed; the CLI always reads fresh data |
+| JSON output in a terminal | tables in a terminal; JSON when piped or with `--json` |
+| exit code 1 for every failure | 2 for usage errors, 1 for API errors, 130 for a cancelled prompt |
+| Node.js 20 | Node.js 22.12 |
 
-```bash
-pawplacer pets create --file pet.json --no-auto-idempotency-key
-```
-
-## Commands
-
-### Pets
-
-```bash
-pawplacer pets list [--status status] [--species species] [--limit n] [--offset n] [--search query] [--updated-since iso]
-pawplacer pets get <id> [--force-refresh]
-pawplacer pets search <query>
-pawplacer pets status <status>
-pawplacer pets create --file pet.json
-pawplacer pets create --prompt
-pawplacer pets update <id-or-custom-id> --file pet-update.json
-pawplacer pets update <id-or-custom-id> --prompt
-pawplacer pets custom-fields
-```
-
-### People
-
-```bash
-pawplacer people list --type adopter [--status status] [--limit n] [--offset n] [--search query] [--updated-since iso]
-pawplacer people get <id> --type adopter [--force-refresh]
-pawplacer people create --file person.json
-pawplacer people create --prompt
-pawplacer people custom-fields --type adopter
-```
-
-Valid people types: `adopter`, `foster`, `surrender`, `volunteer`.
-
-### Adoption Fees And Contracts
-
-```bash
-pawplacer adoption-fees
-pawplacer contracts --type adopter
-```
-
-Valid contract types: `adopter`, `foster`, `surrender`, `volunteer`.
-
-## Global Options
-
-```bash
---api-key <key>     API key; defaults to PAWPLACER_API_KEY
---api-url <url>     API URL; defaults to https://pawplacer.com
---timeout <ms>      request timeout
---no-cache          disable SDK GET cache
---compact           print compact JSON
-```
+Using a removed command or flag prints what to use instead.
 
 ## Development
 
 ```bash
-npm run lint
-npm run format:check
-npm run typecheck
-npm test
-npm run build
-npm run check
+npm install
+npm run check   # lint, format check, typecheck, tests, build
+npm link        # puts your local build on PATH as `pawplacer`
 ```
 
-During development, the CLI uses the published `pawplacer-sdk` package.
-This release requires `pawplacer-sdk@^1.6.0`.
-
-## Troubleshooting
-
-If a command says the API key is required, set `PAWPLACER_API_KEY`, pass
-`--api-key`, or rerun the command in an interactive terminal so the CLI can
-prompt for the key.
-
-If npm reports an engine mismatch, upgrade Node.js to version 20 or newer.
+Tests run the CLI against a local HTTP server with the real SDK.
