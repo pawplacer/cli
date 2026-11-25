@@ -12,7 +12,7 @@ Thanks for helping improve the PawPlacer CLI. Public participation is limited to
 
 Requirements:
 
-- Node.js 20 or newer
+- Node.js 22.12 or newer
 - npm
 
 Install dependencies:

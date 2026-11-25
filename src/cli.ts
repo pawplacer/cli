@@ -1,16 +1,16 @@
 import process from "node:process";
 
-import { createProgram, formatError } from "./program";
-import { checkForUpdates } from "./update-check";
+import { runCli } from "./run";
+import { startUpdateCheck } from "./update-check";
 
 async function main(): Promise<void> {
-  const program = createProgram();
-  try {
-    await checkForUpdates();
-    await program.parseAsync(process.argv);
-  } catch (error) {
-    process.stderr.write(`${formatError(error)}\n`);
-    process.exitCode = 1;
+  const pendingNotice = process.argv.includes("--quiet")
+    ? Promise.resolve(undefined)
+    : startUpdateCheck();
+  process.exitCode = await runCli(process.argv);
+  const notice = await pendingNotice;
+  if (notice) {
+    process.stderr.write(`${notice}\n`);
   }
 }
 
